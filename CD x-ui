@@ -9,10 +9,13 @@ curl -s https://install.speedtest.net/app/cli/install.deb.sh | sudo bash
 sudo apt-get install speedtest
 clear
 speedtest
+
+
 echo " Đã Cài Đặt Thành Công X-UI "  
 echo " Vui Lòng Vào Trình Duyệt Nhập IP VPS Và Thêm Vào Đuôi IP Là :54321 "
 echo " Bây Giờ Bạn Vào X-UI Sửa Thông Tin Và Tạo Vmess Trojan Vless Đợi Gì Nữa Nào "
 echo " User admin & Pass admin. Nhớ Đổi Hết Thông Tin Tránh Bị Mất "
+
 echo " Cách Tạo File "
 echo " Chọn Dòng Thứ 2 (Danh Sách Đến) "
 echo " Bấm Dấu + "
@@ -28,9 +31,11 @@ echo " imageakm1.tv360.vn "
 echo " imageakm2.tv360.vn "
 echo " Các Bạn Tắt Nút Đánh Hơi Để Fix Zalo Sau Đó Ấn Vào Ô Thêm Vào Để Hoàn Thành Tạo File "
 echo " Sau Khi Hoàn Thành File Sẽ Được Tạo Trong Danh Sách "
+
 echo " Bấm Chữ Chạy Ở Đầu File Chọn Dòng Đầu Tiên Để Xem mã QR và Lấy Code "
 echo " Cuối Cùng Các Bạn Vào App Napsternetv Và Quét Mã QR Hoặc Dán Code "
 echo " Bấm Vào File Và Chạy Thui ^^ "
+
 echo " Liên Hệ Với Đậu Đậu Qua Zalo Để Được Hỗ Trợ Nhé: 0983538806 "
 echo " Vào Nhóm Zalo Chúng Tôi Cùng Giao Lưu Nhé : https://zalo.me/g/nlsmbo197 "
 echo " ============ CHÚC CÁC BẠN THÀNH CÔNG ============ "

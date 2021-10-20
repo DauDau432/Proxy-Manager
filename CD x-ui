@@ -8,6 +8,7 @@ ufw allow 80/tcp
 curl -s https://install.speedtest.net/app/cli/install.deb.sh | sudo bash
 sudo apt-get install speedtest
 clear
+speedtest
 echo " Đã Cài Đặt Thành Công X-UI "  
 echo " Vui Lòng Vào Trình Duyệt Nhập IP VPS Và Thêm Vào Đuôi IP Là :54321 "
 echo " Bây Giờ Bạn Vào X-UI Sửa Thông Tin Và Tạo Vmess Trojan Vless Đợi Gì Nữa Nào "
@@ -33,5 +34,3 @@ echo " Bấm Vào File Và Chạy Thui ^^ "
 echo " Liên Hệ Với Đậu Đậu Qua Zalo Để Được Hỗ Trợ Nhé: 0983538806 "
 echo " Vào Nhóm Zalo Chúng Tôi Cùng Giao Lưu Nhé : https://zalo.me/g/nlsmbo197 "
 echo " ============ CHÚC CÁC BẠN THÀNH CÔNG ============ "
-speedtest
-y

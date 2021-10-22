@@ -11,7 +11,7 @@ clear
 speedtest
 echo ""
 echo ""
-echo " ----------------- Đã Cài Đặt Thành Công X-UI ----------------- "  
+echo " ----------------- ĐÃ CÀI ĐẶT THÀNH CÔNG X-UI ----------------- "  
 echo " Vui Lòng Vào Trình Duyệt Nhập IP VPS Và Thêm Vào Đuôi IP Là :54321 "
 echo " Bây Giờ Bạn Vào X-UI Sửa Thông Tin Và Tạo Vmess Trojan Vless Đợi Gì Nữa Nào "
 echo " User admin & Pass admin. Nhớ Đổi Hết Thông Tin Tránh Bị Mất "

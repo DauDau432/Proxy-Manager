@@ -5,6 +5,10 @@ ufw allow 54321
 ufw allow 443
 ufw allow 80
 ufw allow 80/tcp
+firewall-cmd --zone=public --add-port=54321/tcp --permanent
+firewall-cmd --zone=public --add-port=80/tcp --permanent
+firewall-cmd --zone=public --add-port=443/tcp --permanent
+firewall-cmd --reload
 clear
 echo ""
 echo " ---------------- ĐÃ CÀI ĐẶT THÀNH CÔNG X-UI ---------------- "  

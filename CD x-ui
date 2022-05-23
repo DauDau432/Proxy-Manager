@@ -1,5 +1,4 @@
 #!/bin/bash
-apt-get update -y
 bash <(curl -Ls https://raw.githubusercontent.com/DauDau432/VH_x-ui/main/install.sh)
 ufw allow 54321
 ufw allow 443

@@ -9,6 +9,7 @@ NC='\033[0m'
 check_root() {
     if [ "$(whoami)" != "root" ]; then
         echo -e "${RED}LỖI: Bạn cần chạy script với quyền root hoặc sử dụng sudo.${NC}"
+        echo -e ""
         read -p "Nhấn Enter để tiếp tục..."
         exit 1
     fi
@@ -21,6 +22,7 @@ generate_random_port() {
         echo -e "${GREEN}Đang cài đặt net-tools, vui lòng chờ...${NC}"
         apt install net-tools -y >/dev/null 2>&1 || yum install net-tools -y >/dev/null 2>&1 || {
             echo -e "${RED}Không thể cài net-tools. Vui lòng cài thủ công: 'apt install net-tools' hoặc 'yum install net-tools'.${NC}"
+            echo -e ""
             read -p "Nhấn Enter để tiếp tục..."
             exit 1
         }
@@ -53,6 +55,7 @@ check_os() {
             echo "almalinux9"
         else
             echo -e "${RED}Hệ điều hành CentOS/AlmaLinux không được hỗ trợ: $OS${NC}"
+            echo -e ""
             read -p "Nhấn Enter để tiếp tục..."
             exit 1
         fi
@@ -80,16 +83,19 @@ check_os() {
             echo "debian12"
         else
             echo -e "${RED}Hệ điều hành không được hỗ trợ: $OS${NC}"
+            echo -e ""
             read -p "Nhấn Enter để tiếp tục..."
             exit 1
         fi
     elif command -v lsb_release >/dev/null 2>&1; then
         OS=$(lsb_release -d | cut -f2)
         echo -e "${RED}Hệ điều hành không được hỗ trợ (lsb_release): $OS${NC}"
+        echo -e ""
         read -p "Nhấn Enter để tiếp tục..."
         exit 1
     else
         echo -e "${RED}Không thể xác định hệ điều hành.${NC}"
+        echo -e ""
         read -p "Nhấn Enter để tiếp tục..."
         exit 1
     fi
@@ -121,8 +127,9 @@ check_squid_status() {
         echo -e "  IP: $ip"
         echo -e "  Cổng: $port"
         if [ -f /etc/squid/passwd ]; then
-            echo -e "  Danh sách người dùng:"
+            echo -e "  Danh sách người dùng (mật khẩu được nhập khi tạo):"
             grep -v '^$' /etc/squid/passwd | awk -F: '{print "    - " $1}' | nl
+            echo -e "  Lưu ý: Sử dụng mật khẩu đã nhập khi tạo user để kết nối proxy."
         else
             echo -e "  Không có người dùng nào."
         fi
@@ -349,10 +356,27 @@ change_port() {
     SOK_OS=$(check_os)
     PORT=$(generate_random_port)
     echo -e "${GREEN}Đang thay đổi cổng Squid thành $PORT...${NC}"
+    echo -e ""
+    if [ -z "$PORT" ] || ! [[ "$PORT" =~ ^[0-9]+$ ]]; then
+        echo -e "${RED}Lỗi: Cổng không hợp lệ ($PORT).${NC}"
+        echo -e ""
+        read -p "Nhấn Enter để tiếp tục..."
+        return
+    fi
     if [ -f /etc/squid/squid.conf ]; then
-        sed -i "s/http_port [0-9]\+/http_port $PORT/" /etc/squid/squid.conf
+        sed -i "s/http_port [0-9]\+/http_port $PORT/" /etc/squid/squid.conf || {
+            echo -e "${RED}Lỗi khi cập nhật tệp cấu hình Squid.${NC}"
+            echo -e ""
+            read -p "Nhấn Enter để tiếp tục..."
+            return
+        }
     elif [ -f /etc/squid3/squid.conf ]; then
-        sed -i "s/http_port [0-9]\+/http_port $PORT/" /etc/squid3/squid.conf
+        sed -i "s/http_port [0-9]\+/http_port $PORT/" /etc/squid3/squid.conf || {
+            echo -e "${RED}Lỗi khi cập nhật tệp cấu hình Squid.${NC}"
+            echo -e ""
+            read -p "Nhấn Enter để tiếp tục..."
+            return
+        }
     else
         echo -e "${RED}Không tìm thấy tệp cấu hình Squid.${NC}"
         echo -e ""
@@ -366,8 +390,13 @@ change_port() {
         firewall-cmd --reload >/dev/null 2>&1
     else
         echo -e "${GREEN}Đang cập nhật iptables...${NC}"
-        iptables -D INPUT -p tcp --dport 3128 -j ACCEPT
-        iptables -I INPUT -p tcp --dport $PORT -j ACCEPT
+        iptables -D INPUT -p tcp --dport 3128 -j ACCEPT 2>/dev/null
+        iptables -I INPUT -p tcp --dport $PORT -j ACCEPT || {
+            echo -e "${RED}Lỗi khi cập nhật iptables cho cổng $PORT.${NC}"
+            echo -e ""
+            read -p "Nhấn Enter để tiếp tục..."
+            return
+        }
         iptables-save >/dev/null 2>&1
     fi
     echo -e "${GREEN}Đang khởi động lại dịch vụ Squid...${NC}"

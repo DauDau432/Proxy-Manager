@@ -1,6 +1,6 @@
 # Proxy Manager - Quản lý Squid Proxy
 
-`proxy-manager.sh` là một script shell dùng để cài đặt và quản lý **Squid Proxy** trên các hệ điều hành Linux như Ubuntu, Debian, CentOS, và AlmaLinux. Script cung cấp giao diện menu tương tác bằng tiếng Việt, hỗ trợ cài đặt proxy HTTP/HTTPS, quản lý người dùng, thay đổi cổng, và kiểm tra trạng thái proxy.
+`proxy-manager.sh` là một script shell dùng để cài đặt và quản lý **Squid Proxy** trên các hệ điều hành Linux như Ubuntu, Debian, CentOS, và AlmaLinux. hỗ trợ cài đặt proxy HTTP/HTTPS, quản lý người dùng, thay đổi cổng, và kiểm tra trạng thái proxy.
 
 ## Tính năng
 
@@ -11,14 +11,10 @@
   - Thêm nhiều người dùng proxy với tên người dùng và mật khẩu.
   - Xóa người dùng, hiển thị danh sách người dùng hiện có trước khi xóa.
 - **Thay đổi cổng proxy**:
-  - Sinh cổng ngẫu nhiên mới và cập nhật cấu hình firewall.
+  - Tạo cổng ngẫu nhiên mới và cập nhật cấu hình firewall.
 - **Kiểm tra trạng thái proxy**:
   - Hiển thị thông tin proxy hiện tại: IP công cộng, cổng, danh sách người dùng, và trạng thái dịch vụ.
   - Thông báo nếu Squid chưa được cài đặt.
-- **Giao diện tiếng Việt**:
-  - Tất cả thông báo và menu sử dụng tiếng Việt với mã hóa UTF-8.
-- **Mật khẩu không ẩn**:
-  - Mật khẩu hiển thị khi nhập để dễ kiểm tra.
 - **Hỗ trợ nhiều hệ điều hành**:
   - Ubuntu: 14.04, 16.04, 18.04, 20.04, 22.04
   - Debian: 8, 9, 10, 11, 12
@@ -31,7 +27,6 @@
 - **Kết nối internet**: Cần kết nối mạng để tải gói phần mềm và tệp cấu hình.
 - **Hệ điều hành**: Một trong các hệ điều hành được liệt kê ở trên.
 - **Gói phụ thuộc**: `curl`, `jq`, `net-tools` (sẽ được cài tự động nếu cần).
-- **Locale tiếng Việt**: Để hiển thị đúng ký tự tiếng Việt, cần cài đặt locale `vi_VN.UTF-8`.
 
 ## Cài đặt và chạy
 
@@ -76,7 +71,10 @@ Chọn `vi_VN.UTF-8` và đặt làm mặc định.
 Đảm bảo các gói cần thiết được cài:
 ```bash
 sudo apt update && sudo apt install curl jq net-tools  # Ubuntu/Debian
-# Hoặc: sudo yum install curl jq net-tools  # CentOS/AlmaLinux
+```
+***Hoặc:***
+```
+sudo yum install curl jq net-tools  # CentOS/AlmaLinux
 ```
 
 ## Cách sử dụng
@@ -96,7 +94,7 @@ Chọn một tùy chọn [1-6]:
 ### Tùy chọn trong menu
 1. **Cài đặt Squid Proxy**:
    - Cài đặt Squid với cổng ngẫu nhiên.
-   - Yêu cầu nhập tên người dùng và mật khẩu (mật khẩu hiển thị khi gõ).
+   - Yêu cầu nhập tên người dùng và mật khẩu).
    - Hiển thị thông tin proxy: `IP:cổng:username:password`.
    - Nếu Squid đã cài, hiển thị thông tin proxy hiện tại và không cài lại.
 
@@ -108,7 +106,7 @@ Chọn một tùy chọn [1-6]:
    - Hiển thị danh sách người dùng hiện có trước khi yêu cầu nhập tên người dùng để xóa.
 
 4. **Thay đổi cổng Proxy**:
-   - Sinh cổng ngẫu nhiên mới, cập nhật cấu hình Squid và firewall.
+   - Tạo cổng ngẫu nhiên mới, cập nhật cấu hình Squid và firewall.
 
 5. **Xem trạng thái Proxy**:
    - Hiển thị thông tin proxy hiện tại: IP, cổng, danh sách người dùng, trạng thái dịch vụ.
@@ -204,27 +202,18 @@ Kiểm tra trạng thái dịch vụ Squid:
 ```bash
 systemctl status squid
 ```
+Nếu Squid không chạy, khởi động lại:
+```bash
+systemctl restart squid
+```
 
-## Lưu ý
-
-- **Bảo mật**:
-  - Lệnh one-liner tải script trực tiếp từ GitHub. Kiểm tra nội dung script trước khi chạy để đảm bảo an toàn:
-    ```bash
-    curl -Ls https://raw.githubusercontent.com/DauDau432/Proxy-Manager/refs/heads/main/proxy-manager.sh | less
-    ```
-  - Mật khẩu hiển thị khi nhập, chạy script trong môi trường an toàn.
-- **Locale tiếng Việt**:
-  - Nếu ký tự tiếng Việt hiển thị sai, cài đặt locale như hướng dẫn ở trên.
 - **Lỗi tiềm ẩn**:
   - Nếu gặp lỗi "curl: command not found", cài curl:
     ```bash
     sudo apt install curl  # Ubuntu/Debian
     sudo yum install curl  # CentOS/AlmaLinux
     ```
-  - Nếu Squid không chạy, khởi động lại:
-    ```bash
-    systemctl restart squid
-    ```
+
 
 ## Cải tiến trong tương lai
 

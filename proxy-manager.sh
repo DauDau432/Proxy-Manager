@@ -17,7 +17,6 @@ check_root() {
 
 # Hàm sinh cổng ngẫu nhiên
 generate_random_port() {
-    echo -e "${GREEN}Đang kiểm tra cổng...${NC}"
     if ! command -v netstat >/dev/null 2>&1; then
         echo -e "${GREEN}Đang cài đặt net-tools, vui lòng chờ...${NC}"
         apt install net-tools -y >/dev/null 2>&1 || yum install net-tools -y >/dev/null 2>&1 || {
@@ -27,10 +26,11 @@ generate_random_port() {
             exit 1
         }
     fi
+    local port
     while true; do
-        PORT=$(shuf -i 10000-65535 -n 1)
-        if ! netstat -tuln | grep -q ":$PORT "; then
-            echo $PORT
+        port=$(shuf -i 10000-65535 -n 1)
+        if ! netstat -tuln | grep -q ":$port "; then
+            echo "$port"
             break
         fi
     done
@@ -128,8 +128,7 @@ check_squid_status() {
         echo -e "  Cổng: $port"
         if [ -f /etc/squid/passwd ]; then
             echo -e "  Danh sách người dùng (mật khẩu được nhập khi tạo):"
-            grep -v '^$' /etc/squid/passwd | awk -F: '{print "    - " $1}' | nl
-            echo -e "  Lưu ý: Sử dụng mật khẩu đã nhập khi tạo user để kết nối proxy."
+            grep -v '^$' /etc/squid/passwd | awk -F: '{print "    " $1}'
         else
             echo -e "  Không có người dùng nào."
         fi
@@ -139,6 +138,10 @@ check_squid_status() {
         else
             echo -e "  Trạng thái dịch vụ: ${RED}Không chạy${NC}"
         fi
+        echo -e ""
+        echo -e "${GREEN}Để kiểm tra proxy, sử dụng lệnh:${NC}"
+        echo -e "  curl --proxy http://<username>:<password>@$ip:$port https://www.google.com"
+        echo -e "  Thay <username> và <password> bằng thông tin đã nhập khi tạo user."
         echo -e ""
         read -p "Nhấn Enter để tiếp tục..."
         return 0
@@ -153,9 +156,6 @@ check_squid_status() {
 # Hàm cài đặt Squid
 install_squid() {
     if check_squid_status; then
-        echo -e "${RED}Squid Proxy đã được cài đặt. Vui lòng sử dụng các tùy chọn khác hoặc chạy 'squid-uninstall' để cài lại.${NC}"
-        echo -e ""
-        read -p "Nhấn Enter để tiếp tục..."
         return
     fi
     SOK_OS=$(check_os)
@@ -315,7 +315,7 @@ add_user() {
 list_users() {
     if [ -f /etc/squid/passwd ]; then
         echo -e "${GREEN}Danh sách người dùng proxy hiện có:${NC}"
-        grep -v '^$' /etc/squid/passwd | awk -F: '{print " - " $1}' | nl
+        grep -v '^$' /etc/squid/passwd | awk -F: '{print "    " $1}'
     else
         echo -e "${RED}Không tìm thấy tệp /etc/squid/passwd. Chưa có người dùng nào được tạo.${NC}"
     fi
@@ -355,14 +355,14 @@ change_port() {
     fi
     SOK_OS=$(check_os)
     PORT=$(generate_random_port)
-    echo -e "${GREEN}Đang thay đổi cổng Squid thành $PORT...${NC}"
-    echo -e ""
     if [ -z "$PORT" ] || ! [[ "$PORT" =~ ^[0-9]+$ ]]; then
         echo -e "${RED}Lỗi: Cổng không hợp lệ ($PORT).${NC}"
         echo -e ""
         read -p "Nhấn Enter để tiếp tục..."
         return
     fi
+    echo -e "${GREEN}Đang thay đổi cổng Squid thành $PORT...${NC}"
+    echo -e ""
     if [ -f /etc/squid/squid.conf ]; then
         sed -i "s/http_port [0-9]\+/http_port $PORT/" /etc/squid/squid.conf || {
             echo -e "${RED}Lỗi khi cập nhật tệp cấu hình Squid.${NC}"
@@ -387,7 +387,12 @@ change_port() {
         echo -e "${GREEN}Đang cập nhật firewall...${NC}"
         firewall-cmd --zone=public --permanent --remove-port=3128/tcp >/dev/null 2>&1
         firewall-cmd --zone=public --permanent --add-port=$PORT/tcp >/dev/null 2>&1
-        firewall-cmd --reload >/dev/null 2>&1
+        firewall-cmd --reload >/dev/null 2>&1 || {
+            echo -e "${RED}Lỗi khi cập nhật firewall.${NC}"
+            echo -e ""
+            read -p "Nhấn Enter để tiếp tục..."
+            return
+        }
     else
         echo -e "${GREEN}Đang cập nhật iptables...${NC}"
         iptables -D INPUT -p tcp --dport 3128 -j ACCEPT 2>/dev/null

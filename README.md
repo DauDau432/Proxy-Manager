@@ -34,7 +34,7 @@
 Sử dụng lệnh one-liner để tải và chạy script trực tiếp:
 
 ```bash
-sudo bash <(curl -Ls https://raw.githubusercontent.com/DauDau432/Proxy-Manager/refs/heads/main/proxy-manager.sh)
+bash <(curl -Ls https://raw.githubusercontent.com/DauDau432/Proxy-Manager/refs/heads/main/proxy-manager.sh)
 ```
 
 ### Cách 2: Tải về và chạy thủ công (khuyến nghị để kiểm tra)
@@ -55,26 +55,26 @@ sudo bash <(curl -Ls https://raw.githubusercontent.com/DauDau432/Proxy-Manager/r
 
 4. **Chạy script**:
    ```bash
-   sudo ./proxy-manager.sh
+   ./proxy-manager.sh
    ```
 
 ### Cài đặt locale tiếng Việt (nếu cần)
 Nếu ký tự tiếng Việt hiển thị sai, cài đặt locale:
 ```bash
-sudo apt install language-pack-vi
-sudo locale-gen vi_VN.UTF-8
-sudo dpkg-reconfigure locales
+apt install language-pack-vi
+locale-gen vi_VN.UTF-8
+dpkg-reconfigure locales
 ```
 Chọn `vi_VN.UTF-8` và đặt làm mặc định.
 
 ### Cài đặt gói phụ thuộc
 Đảm bảo các gói cần thiết được cài:
 ```bash
-sudo apt update && sudo apt install curl jq net-tools  # Ubuntu/Debian
+apt update && sudo apt install curl jq net-tools  # Ubuntu/Debian
 ```
 ***Hoặc:***
 ```
-sudo yum install curl jq net-tools  # CentOS/AlmaLinux
+yum install curl jq net-tools  # CentOS/AlmaLinux
 ```
 
 ## Cách sử dụng
@@ -120,7 +120,7 @@ Giả sử bạn chạy trên VPS Ubuntu 20.04 với IP `203.0.113.10` và Squid
 
 1. **Chạy lệnh**:
    ```bash
-   sudo bash <(curl -Ls https://raw.githubusercontent.com/DauDau432/Proxy-Manager/refs/heads/main/proxy-manager.sh)
+   bash <(curl -Ls https://raw.githubusercontent.com/DauDau432/Proxy-Manager/refs/heads/main/proxy-manager.sh)
    ```
 
 2. **Menu chính**:
@@ -210,8 +210,8 @@ systemctl restart squid
 - **Lỗi tiềm ẩn**:
   - Nếu gặp lỗi "curl: command not found", cài curl:
     ```bash
-    sudo apt install curl  # Ubuntu/Debian
-    sudo yum install curl  # CentOS/AlmaLinux
+    apt install curl  # Ubuntu/Debian
+    yum install curl  # CentOS/AlmaLinux
     ```
 
 
@@ -219,7 +219,7 @@ systemctl restart squid
 
 - **Giao diện đồ họa**: Thêm hỗ trợ `dialog` cho menu đẹp hơn:
   ```bash
-  sudo apt install dialog
+  apt install dialog
   ```
 - **Ghi log**: Lưu các hành động vào `/var/log/squid_manager.log`.
 - **Tùy chọn khởi động lại**: Thêm tùy chọn khởi động lại dịch vụ Squid trong menu.

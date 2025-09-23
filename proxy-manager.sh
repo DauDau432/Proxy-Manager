@@ -1,9 +1,5 @@
 #!/bin/bash
 
-# Đặt mã hóa tiếng Việt
-export LANG=vi_VN.UTF-8
-export LC_ALL=vi_VN.UTF-8
-
 # Màu sắc cho giao diện
 GREEN='\033[0;32m'
 RED='\033[0;31m'

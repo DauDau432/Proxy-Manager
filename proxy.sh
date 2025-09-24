@@ -43,6 +43,9 @@ check_and_install_squid() {
     echo -e "${WHITE}[-] Đang cài đặt Squid...${NC}"
     apt update >/dev/null 2>&1
     apt install -y squid apache2-utils >/dev/null 2>&1
+    # Tạo file $PASSWD_FILE rỗng ngay từ đầu
+    touch $PASSWD_FILE
+    chmod 600 $PASSWD_FILE
     touch $USERS_FILE
     chmod 600 $USERS_FILE
     echo -e "${WHITE}[-] Đang lấy danh sách IP...${NC}"
@@ -52,7 +55,7 @@ check_and_install_squid() {
         read
         exit 1
     fi
-    echo "Danh sách IP chưa có:"
+    echo "Danh sách IP chưa cài proxy:"
     ip_array=($ip_list)
     for i in "${!ip_array[@]}"; do
         echo " [$((i+1))] ${ip_array[$i]}"

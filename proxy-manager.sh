@@ -43,18 +43,21 @@ check_and_install_squid() {
     echo -e "${WHITE}[-] Đang cài đặt Squid...${NC}"
     apt update >/dev/null 2>&1
     apt install -y squid apache2-utils >/dev/null 2>&1
-    # Tạo file $PASSWD_FILE rỗng ngay từ đầu
+
+    # Tạo file passwd rỗng
     touch $PASSWD_FILE
     chmod 600 $PASSWD_FILE
     touch $USERS_FILE
     chmod 600 $USERS_FILE
+
     echo -e "${WHITE}[-] Đang lấy danh sách IP...${NC}"
     ip_list=$(ip addr | grep inet | grep -v inet6 | grep -v 127.0.0.1 | awk '{print $2}' | cut -d'/' -f1)
     if [ -z "$ip_list" ]; then
-        echo -e "${RED}[!] Không tìm thấy IP IPv4 nào trên VPS, ấn Enter để quay lại.${NC}"
+        echo -e "${RED}[!] Không tìm thấy IP IPv4 nào trên VPS.${NC}"
         read
         exit 1
     fi
+
     echo "Danh sách IP chưa cài proxy:"
     ip_array=($ip_list)
     for i in "${!ip_array[@]}"; do
@@ -62,43 +65,54 @@ check_and_install_squid() {
     done
     read -p "-> Chọn số thứ tự IP để cài proxy (Enter để hủy): " choice
     if [ -z "$choice" ]; then
-        echo -e "${RED}[!] Đã hủy thao tác, ấn Enter để quay lại.${NC}"
+        echo -e "${RED}[!] Đã hủy thao tác.${NC}"
         read
         exit 1
     fi
     ip=${ip_array[$((choice-1))]}
-    if [ -z "$ip" ]; then
-        echo -e "${RED}[!] Vui lòng chọn IP hợp lệ, ấn Enter để quay lại.${NC}"
-        read
-        exit 1
-    fi
     port=$((RANDOM % 64511 + 1024))
+
     read -p "-> Nhập username cho proxy: " username
-    if [ -z "$username" ]; then
-        echo -e "${RED}[!] Không được để trống, ấn Enter để quay lại.${NC}"
-        read
-        exit 1
-    fi
     read -p "-> Nhập password cho proxy: " password
-    if [ -z "$password" ]; then
-        echo -e "${RED}[!] Không được để trống, ấn Enter để quay lại.${NC}"
-        read
-        exit 1
-    fi
+
     htpasswd -b -c $PASSWD_FILE "$username" "$password" >/dev/null 2>&1
     echo "$username:$password:$(date +%F_%H:%M):ALL" >> $USERS_FILE
-    echo "auth_param basic program /usr/lib/squid/basic_ncsa_auth $PASSWD_FILE" > $SQUID_CONF
-    echo "auth_param basic realm Proxy Authentication" >> $SQUID_CONF
-    echo "acl authenticated proxy_auth REQUIRED" >> $SQUID_CONF
-    echo "http_access allow authenticated" >> $SQUID_CONF
-    echo "http_access deny all" >> $SQUID_CONF
-    echo "http_port $ip:$port" >> $SQUID_CONF
+
+    # Ghi cấu hình đầy đủ vào squid.conf
+    cat > $SQUID_CONF <<EOF
+auth_param basic program /usr/lib/squid/basic_ncsa_auth $PASSWD_FILE
+auth_param basic realm Proxy Authentication
+acl authenticated proxy_auth REQUIRED
+
+# ACL mặc định
+acl SSL_ports port 443
+acl Safe_ports port 80
+acl Safe_ports port 21
+acl Safe_ports port 443
+acl Safe_ports port 70
+acl Safe_ports port 210
+acl Safe_ports port 1025-65535
+acl Safe_ports port 280
+acl Safe_ports port 488
+acl Safe_ports port 591
+acl Safe_ports port 777
+acl CONNECT method CONNECT
+
+http_access allow authenticated
+http_access deny !Safe_ports
+http_access deny CONNECT !SSL_ports
+http_access deny all
+
+http_port $ip:$port
+EOF
+
     echo -e "${WHITE}[-] Đang cấu hình firewall và khởi động proxy...${NC}"
     iptables -I INPUT -p tcp --dport $port -j ACCEPT >/dev/null 2>&1
     systemctl restart squid >/dev/null 2>&1
-    echo -e "${GREEN}[+] Cài đặt proxy thành công: $ip:$port:$username:$password, ấn Enter để quay lại.${NC}"
+    echo -e "${GREEN}[+] Cài đặt proxy thành công: $ip:$port:$username:$password${NC}"
     read
 }
+
 
 # Function to get unadded IPs
 get_unadded_ips() {
@@ -117,60 +131,35 @@ get_unadded_ips() {
 add_proxy() {
     unadded_ips=$(get_unadded_ips)
     if [ -z "$unadded_ips" ]; then
-        echo -e "${RED}[!] Tất cả IP đã được add proxy, ấn Enter để quay lại.${NC}"
+        echo -e "${RED}[!] Tất cả IP đã được add proxy.${NC}"
         read
         return
     fi
+
     echo "Danh sách IP chưa có:"
     ip_array=($unadded_ips)
     for i in "${!ip_array[@]}"; do
         echo " [$((i+1))] ${ip_array[$i]}"
     done
-    read -p "-> Chọn số thứ tự IP để add proxy (Enter để hủy): " choice
-    if [ -z "$choice" ]; then
-        echo -e "${RED}[!] Đã hủy thao tác, ấn Enter để quay lại.${NC}"
-        read
-        return
-    fi
-    # Kiểm tra phạm vi hợp lệ cho choice
-    if ! [[ "$choice" =~ ^[0-9]+$ ]] || [ "$choice" -lt 1 ] || [ "$choice" -gt "${#ip_array[@]}" ]; then
-        echo -e "${RED}[!] Lựa chọn không hợp lệ, ấn Enter để quay lại.${NC}"
-        read
-        return
-    fi
+    read -p "-> Chọn số thứ tự IP để add proxy: " choice
     ip=${ip_array[$((choice-1))]}
-    if [ -z "$ip" ]; then
-        echo -e "${RED}[!] Lỗi chọn IP, ấn Enter để quay lại.${NC}"
-        read
-        return
-    fi
     port=$((RANDOM % 64511 + 1024))
+
     read -p "-> Nhập username: " username
-    if [ -z "$username" ]; then
-        echo -e "${RED}[!] Không được để trống, ấn Enter để quay lại.${NC}"
-        read
-        return
-    fi
-    # Kiểm tra trùng lặp username
-    if grep -q "^$username:" $PASSWD_FILE; then
-        echo -e "${RED}[!] Username '$username' đã tồn tại, ấn Enter để quay lại.${NC}"
-        read
-        return
-    fi
     read -p "-> Nhập password: " password
-    if [ -z "$password" ]; then
-        echo -e "${RED}[!] Không được để trống, ấn Enter để quay lại.${NC}"
-        read
-        return
-    fi
+
     htpasswd -b $PASSWD_FILE "$username" "$password" >/dev/null 2>&1
+
+    # Thêm port mới vào squid.conf
     echo "http_port $ip:$port" >> $SQUID_CONF
+
     echo -e "${WHITE}[-] Đang cấu hình firewall và khởi động proxy...${NC}"
     iptables -I INPUT -p tcp --dport $port -j ACCEPT >/dev/null 2>&1
     systemctl restart squid >/dev/null 2>&1
-    echo -e "${GREEN}[+] Thêm proxy thành công: $ip:$port:${username}:${password}, ấn Enter để quay lại.${NC}"
+    echo -e "${GREEN}[+] Thêm proxy thành công: $ip:$port:$username:$password${NC}"
     read
 }
+
 
 # Function to edit proxy
 edit_proxy() {

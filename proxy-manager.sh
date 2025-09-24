@@ -76,6 +76,9 @@ check_and_install_squid() {
     read -p "-> Nhập password cho proxy: " password
 
     htpasswd -b -c $PASSWD_FILE "$username" "$password" >/dev/null 2>&1
+    chown proxy:proxy $PASSWD_FILE
+    chmod 640 $PASSWD_FILE
+
     echo "$username:$password:$(date +%F_%H:%M):ALL" >> $USERS_FILE
 
     # Ghi cấu hình đầy đủ vào squid.conf
@@ -113,7 +116,6 @@ EOF
     read
 }
 
-
 # Function to get unadded IPs
 get_unadded_ips() {
     ip_list=$(ip addr | grep inet | grep -v inet6 | grep -v 127.0.0.1 | awk '{print $2}' | cut -d'/' -f1)
@@ -149,6 +151,8 @@ add_proxy() {
     read -p "-> Nhập password: " password
 
     htpasswd -b $PASSWD_FILE "$username" "$password" >/dev/null 2>&1
+    chown proxy:proxy $PASSWD_FILE
+    chmod 640 $PASSWD_FILE
 
     # Thêm port mới vào squid.conf
     echo "http_port $ip:$port" >> $SQUID_CONF
@@ -159,7 +163,6 @@ add_proxy() {
     echo -e "${GREEN}[+] Thêm proxy thành công: $ip:$port:$username:$password${NC}"
     read
 }
-
 
 # Function to edit proxy
 edit_proxy() {
@@ -280,6 +283,9 @@ add_user() {
         return
     fi
     htpasswd -b $PASSWD_FILE "$username" "$password" >/dev/null 2>&1
+    chown proxy:proxy $PASSWD_FILE
+    chmod 640 $PASSWD_FILE
+
     echo -e "${WHITE}[-] Đang khởi động lại proxy...${NC}"
     systemctl restart squid >/dev/null 2>&1
     echo -e "${GREEN}[+] Thêm user $username thành công, ấn Enter để quay lại.${NC}"
@@ -320,9 +326,13 @@ edit_user() {
     username=${username:-$old_user}
     if [ -n "$password" ]; then
         htpasswd -b $PASSWD_FILE "$username" "$password" >/dev/null 2>&1
+        chown proxy:proxy $PASSWD_FILE
+        chmod 640 $PASSWD_FILE
     elif [ "$username" != "$old_user" ]; then
         htpasswd -D $PASSWD_FILE "$old_user" >/dev/null 2>&1
         htpasswd -b $PASSWD_FILE "$username" "$old_pass" >/dev/null 2>&1
+        chown proxy:proxy $PASSWD_FILE
+        chmod 640 $PASSWD_FILE
     fi
     if [ "$username" != "$old_user" ] || [ -n "$password" ]; then
         echo -e "${WHITE}[-] Đang khởi động lại proxy...${NC}"
@@ -360,6 +370,8 @@ delete_user() {
     fi
     echo -e "${WHITE}[-] Đang xóa user và khởi động lại proxy...${NC}"
     htpasswd -D $PASSWD_FILE "$selected" >/dev/null 2>&1
+    chown proxy:proxy $PASSWD_FILE
+    chmod 640 $PASSWD_FILE
     if [ $? -ne 0 ]; then
         echo -e "${RED}[!] Lỗi khi xóa user $selected từ $PASSWD_FILE, ấn Enter để quay lại.${NC}"
         read

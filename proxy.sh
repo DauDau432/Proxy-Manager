@@ -3,7 +3,7 @@
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
-NC='\033[0m' # No Color
+NC='\033[0m'
 WHITE='\033[1;37m'
 
 # Paths
@@ -44,9 +44,9 @@ check_and_install_squid() {
     touch $USERS_FILE
     chmod 600 $USERS_FILE
     echo -e "${WHITE}[-] Đang lấy danh sách IP...${NC}"
-    ip_list=$(ip addr | grep inet | awk '{print $2}' | cut -d'/' -f1 | grep -v "127.0.0.1")
+    ip_list=$(ip addr | grep inet | grep -v inet6 | grep -v 127.0.0.1 | awk '{print $2}' | cut -d'/' -f1)
     if [ -z "$ip_list" ]; then
-        echo -e "${RED}[!] Không tìm thấy IP nào trên VPS.${NC}"
+        echo -e "${RED}[!] Không tìm thấy IP IPv4 nào trên VPS.${NC}"
         exit 1
     fi
     echo "Danh sách IP chưa add:"
@@ -77,7 +77,7 @@ check_and_install_squid() {
 
 # Function to get unadded IPs
 get_unadded_ips() {
-    ip_list=$(ip addr | grep inet | awk '{print $2}' | cut -d'/' -f1 | grep -v "127.0.0.1")
+    ip_list=$(ip addr | grep inet | grep -v inet6 | grep -v 127.0.0.1 | awk '{print $2}' | cut -d'/' -f1)
     added_ips=$(grep http_port $SQUID_CONF 2>/dev/null | awk '{print $2}' | cut -d':' -f1)
     unadded_ips=""
     for ip in $ip_list; do
@@ -109,8 +109,8 @@ add_proxy() {
     read -sp "-> Nhập password (Enter để dùng pass chung): " password
     echo
     if [ -z "$username" ] || [ -z "$password" ]; then
-        username=$(head -n 1 $USERS_FILE | cut -d':' -f1)
-        password=$(head -n 1 $USERS_FILE | cut -d':' -f2)
+        username=$(grep ':ALL$' $USERS_FILE | head -n 1 | cut -d':' -f1)
+        password=$(grep ':ALL$' $USERS_FILE | head -n 1 | cut -d':' -f2)
     else
         htpasswd -b $PASSWD_FILE "$username" "$password" >/dev/null 2>&1
         echo "$username:$password:$(date +%F_%H:%M):$ip:$port" >> $USERS_FILE

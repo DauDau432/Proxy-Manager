@@ -1,311 +1,522 @@
 #!/bin/bash
-# Màu sắc cho giao diện
-GREEN='\033[0;32m'
+
+# Colors for output
 RED='\033[0;31m'
+GREEN='\033[0;32m'
 NC='\033[0m'
+WHITE='\033[1;37m'
 
-# Hàm kiểm tra quyền root
-check_root() {
-    if [ "$(whoami)" != "root" ]; then
-        echo -e "${RED}LỖI: Bạn cần chạy script với quyền root hoặc sử dụng sudo.${NC}"
-        exit 1
-    fi
+# Paths
+SQUID_CONF="/etc/squid/squid.conf"
+PASSWD_FILE="/etc/squid/passwd"
+USERS_FILE="/etc/squid/users.txt"
+
+# Function to center text
+center_text() {
+    local text="$1"
+    local width=55
+    local text_len=${#text}
+    local padding=$(( (width - text_len) / 2 ))
+    printf "%${padding}s%s%${padding}s\n" "" "$text" ""
 }
 
-# Hàm lấy danh sách IPv4
-get_ips() {
-    mapfile -t IPS < <(ip -4 addr show | grep inet | grep -v 127.0.0.1 | awk '{print $2}' | cut -d'/' -f1)
-    if [ ${#IPS[@]} -eq 0 ]; then
-        echo -e "${RED}Không tìm thấy địa chỉ IPv4.${NC}"
-        exit 1
-    fi
-}
-
-# Hàm cài phụ thuộc chung
-install_dependencies() {
-    echo -e "${GREEN}Đang cài đặt các gói phụ thuộc cơ bản...${NC}"
-    if command -v apt >/dev/null 2>&1; then
-        apt update >/dev/null 2>&1
-        apt install wget net-tools jq -y >/dev/null 2>&1 || {
-            echo -e "${RED}Không thể cài wget, net-tools hoặc jq qua apt.${NC}"
-            exit 1
-        }
-    elif command -v yum >/dev/null 2>&1; then
-        yum install wget net-tools jq -y >/dev/null 2>&1 || {
-            echo -e "${RED}Không thể cài wget, net-tools hoặc jq qua yum.${NC}"
-            exit 1
-        }
-    elif command -v dnf >/dev/null 2>&1; then
-        dnf install wget net-tools jq -y >/dev/null 2>&1 || {
-            echo -e "${RED}Không thể cài wget, net-tools hoặc jq qua dnf.${NC}"
-            exit 1
-        }
-    else
-        echo -e "${RED}Không tìm thấy trình quản lý gói (apt/yum/dnf).${NC}"
-        exit 1
-    fi
-}
-
-# Hàm tải sok-find-os
-download_sok_find_os() {
-    wget -q --no-check-certificate -O /usr/local/bin/sok-find-os https://raw.githubusercontent.com/serverok/squid-proxy-installer/master/sok-find-os.sh >/dev/null 2>&1
-    chmod 755 /usr/local/bin/sok-find-os
-    if [ ! -f /usr/local/bin/sok-find-os ]; then
-        echo -e "${RED}Không thể tải sok-find-os.${NC}"
-        exit 1
-    fi
-}
-
-# Hàm kiểm tra hệ điều hành
-check_os() {
-    SOK_OS=$(/usr/local/bin/sok-find-os)
-    if [ "$SOK_OS" == "ERROR" ]; then
-        echo -e "${RED}Hệ điều hành không được hỗ trợ.${NC}"
-        exit 1
-    fi
-    echo "$SOK_OS"
-}
-
-# Hàm sinh cổng ngẫu nhiên
-generate_random_port() {
-    local port
-    local attempts=0
-    while true; do
-        port=$(shuf -i 10000-65535 -n 1)
-        if ! netstat -tuln | grep -q ":$port "; then
-            echo "$port"
-            break
+# Function to display header
+display_header() {
+    local status="Không chạy"
+    local proxy_count=0
+    local user_count=0
+    if systemctl is-active --quiet squid; then
+        status="Đang chạy"
+        proxy_count=$(grep -oP '^http_port \S+:\d+' $SQUID_CONF | wc -l)
+        if [ -f "$PASSWD_FILE" ] && [ -s "$PASSWD_FILE" ]; then
+            user_count=$(grep -v '^#' $PASSWD_FILE | wc -l)
         fi
-        attempts=$((attempts+1))
-        if [ $attempts -gt 10 ]; then
-            echo -e "${RED}Không tìm được cổng trống sau 10 lần thử.${NC}"
-            exit 1
-        fi
-    done
+    fi
+    echo -e "[Trạng thái Proxy: $status | Proxy: $proxy_count | User: $user_count]"
 }
 
-# Hàm kiểm tra trạng thái Squid
-check_squid_status() {
-    echo -e "${GREEN}=== Kiểm tra trạng thái Squid Proxy ===${NC}"
-    if [[ -d /etc/squid/ || -d /etc/squid3/ ]]; then
-        echo -e "${GREEN}Squid Proxy đã được cài đặt.${NC}"
-        # Lấy danh sách IP
-        get_ips
-        # Lấy cổng
-        if [ -f /etc/squid/squid.conf ]; then
-            port=$(grep -E "^http_port" /etc/squid/squid.conf | awk '{print $2}' || echo "Không xác định")
-        elif [ -f /etc/squid3/squid.conf ]; then
-            port=$(grep -E "^http_port" /etc/squid3/squid.conf | awk '{print $2}' || echo "Không xác định")
-        else
-            port="Không xác định"
-        fi
-        # Hiển thị thông tin
-        echo -e "${GREEN}Thông tin proxy hiện tại:${NC}"
-        for ip in "${IPS[@]}"; do
-            echo -e " IP: $ip, Cổng: $port"
-        done
-        if [ -f /etc/squid/passwd ]; then
-            echo -e " Danh sách người dùng:"
-            grep -v '^$' /etc/squid/passwd | awk -F: '{print "  " $1}'
-        else
-            echo -e " Không có người dùng nào."
-        fi
-        if systemctl is-active squid >/dev/null 2>&1; then
-            echo -e " Trạng thái dịch vụ: ${GREEN}Đang chạy${NC}"
-        else
-            echo -e " Trạng thái dịch vụ: ${RED}Không chạy${NC}"
-        fi
-        echo -e "${GREEN}Kiểm tra proxy: curl --proxy http://<user>:<pass>@<IP>:$port https://www.google.com${NC}"
+# Function to check and install Squid
+check_and_install_squid() {
+    if [ -d "/etc/squid" ] || [ -d "/etc/squid3" ]; then
         return 0
-    else
-        echo -e "${RED}Squid Proxy chưa được cài đặt.${NC}"
-        return 1
     fi
-}
-
-# Hàm cài đặt Squid
-install_squid() {
-    if check_squid_status; then
-        echo -e "${RED}Squid đã được cài đặt. Chạy 'squid-uninstall' để gỡ trước khi cài lại.${NC}"
-        return
+    echo -e "${WHITE}[-] Đang cài đặt Squid...${NC}"
+    apt update >/dev/null 2>&1
+    apt install -y squid apache2-utils >/dev/null 2>&1
+    # Tạo file $PASSWD_FILE rỗng ngay từ đầu
+    touch $PASSWD_FILE
+    chmod 600 $PASSWD_FILE
+    touch $USERS_FILE
+    chmod 600 $USERS_FILE
+    echo -e "${WHITE}[-] Đang lấy danh sách IP...${NC}"
+    ip_list=$(ip addr | grep inet | grep -v inet6 | grep -v 127.0.0.1 | awk '{print $2}' | cut -d'/' -f1)
+    if [ -z "$ip_list" ]; then
+        echo -e "${RED}[!] Không tìm thấy IP IPv4 nào trên VPS, ấn Enter để quay lại.${NC}"
+        read
+        exit 1
     fi
-    SOK_OS=$(check_os)
-    PORT=$(generate_random_port)
-    echo -e "${GREEN}Đang cài đặt Squid Proxy trên cổng $PORT...${NC}"
-
-    # Tải script bổ trợ
-    wget -q --no-check-certificate -O /usr/local/bin/squid-uninstall https://raw.githubusercontent.com/serverok/squid-proxy-installer/master/squid-uninstall.sh >/dev/null 2>&1
-    wget -q --no-check-certificate -O /usr/local/bin/squid-add-user https://raw.githubusercontent.com/serverok/squid-proxy-installer/master/squid-add-user.sh >/dev/null 2>&1
-    chmod 755 /usr/local/bin/squid-uninstall /usr/local/bin/squid-add-user
-
-    # Cài đặt Squid theo OS
-    case $SOK_OS in
-        ubuntu2204|ubuntu2004|ubuntu1804|ubuntu1604|ubuntu1404)
-            apt install apache2-utils squid -y >/dev/null 2>&1 || { echo -e "${RED}Lỗi cài squid.${NC}"; exit 1; }
-            mkdir -p /etc/squid
-            touch /etc/squid/passwd /etc/squid/blacklist.acl
-            mv /etc/squid/squid.conf /etc/squid/squid.conf.bak 2>/dev/null
-            wget -q --no-check-certificate -O /etc/squid/squid.conf https://raw.githubusercontent.com/serverok/squid-proxy-installer/master/conf/ubuntu-2204.conf >/dev/null 2>&1 || { echo -e "${RED}Lỗi tải config.${NC}"; exit 1; }
-            sed -i "s/http_port 3128/http_port $PORT/" /etc/squid/squid.conf
-            if [ -f /sbin/iptables ]; then
-                iptables -I INPUT -p tcp --dport $PORT -j ACCEPT
-                iptables-save >/dev/null 2>&1 || echo -e "${RED}Lỗi lưu iptables.${NC}"
-            fi
-            systemctl enable squid >/dev/null 2>&1
-            systemctl restart squid || { echo -e "${RED}Lỗi khởi động squid.${NC}"; exit 1; }
-            ;;
-        debian12|debian11|debian10|debian9|debian8)
-            apt install apache2-utils squid -y >/dev/null 2>&1 || { echo -e "${RED}Lỗi cài squid.${NC}"; exit 1; }
-            rm -rf /etc/squid >/dev/null 2>&1
-            mkdir -p /etc/squid
-            touch /etc/squid/passwd /etc/squid/blacklist.acl
-            if [ "$SOK_OS" == "debian12" ]; then
-                mkdir -p /etc/squid/conf.d
-                wget -q --no-check-certificate -O /etc/squid/conf.d/serverok.conf https://raw.githubusercontent.com/serverok/squid-proxy-installer/master/conf/debian12.conf >/dev/null 2>&1
-            else
-                wget -q --no-check-certificate -O /etc/squid/squid.conf https://raw.githubusercontent.com/serverok/squid-proxy-installer/master/squid.conf >/dev/null 2>&1
-            fi
-            sed -i "s/http_port 3128/http_port $PORT/" /etc/squid/squid.conf 2>/dev/null
-            if [ -f /sbin/iptables ]; then
-                iptables -I INPUT -p tcp --dport $PORT -j ACCEPT
-                iptables-save >/dev/null 2>&1 || echo -e "${RED}Lỗi lưu iptables.${NC}"
-            fi
-            systemctl enable squid >/dev/null 2>&1
-            systemctl restart squid || { echo -e "${RED}Lỗi khởi động squid.${NC}"; exit 1; }
-            ;;
-        centos7|centos8|centos8s|centos9|almalinux8|almalinux9)
-            if [ "$SOK_OS" == "centos7" ]; then
-                yum install squid httpd-tools -y >/dev/null 2>&1 || { echo -e "${RED}Lỗi cài squid.${NC}"; exit 1; }
-            else
-                dnf install squid httpd-tools -y >/dev/null 2>&1 || yum install squid httpd-tools -y >/dev/null 2>&1 || { echo -e "${RED}Lỗi cài squid.${NC}"; exit 1; }
-            fi
-            touch /etc/squid/blacklist.acl
-            mv /etc/squid/squid.conf /etc/squid/squid.conf.bak 2>/dev/null
-            wget -q --no-check-certificate -O /etc/squid/squid.conf https://raw.githubusercontent.com/serverok/squid-proxy-installer/master/conf/squid-centos7.conf >/dev/null 2>&1 || { echo -e "${RED}Lỗi tải config.${NC}"; exit 1; }
-            sed -i "s/http_port 3128/http_port $PORT/" /etc/squid/squid.conf
-            if [ -f /usr/bin/firewall-cmd ]; then
-                firewall-cmd --zone=public --permanent --add-port=$PORT/tcp >/dev/null 2>&1
-                firewall-cmd --reload >/dev/null 2>&1 || echo -e "${RED}Lỗi reload firewall.${NC}"
-            fi
-            systemctl enable squid >/dev/null 2>&1
-            systemctl restart squid || { echo -e "${RED}Lỗi khởi động squid.${NC}"; exit 1; }
-            ;;
-        *)
-            echo -e "${RED}Hệ điều hành không được hỗ trợ: $SOK_OS${NC}"
-            exit 1
-            ;;
-    esac
-
-    # Thêm tài khoản proxy
-    echo -e "${GREEN}Đang tạo tài khoản proxy...${NC}"
-    read -p "Nhập tên người dùng proxy: " usernamesquid
-    read -p "Nhập mật khẩu proxy: " passwordsquid
-    htpasswd -b -c /etc/squid/passwd "$usernamesquid" "$passwordsquid" || { echo -e "${RED}Lỗi thêm user.${NC}"; exit 1; }
-
-    # Hiển thị thông tin proxy
-    get_ips
-    echo -e "${GREEN}Cài đặt Proxy thành công:${NC}"
-    for ip in "${IPS[@]}"; do
-        echo -e " Proxy: $ip:$PORT:$usernamesquid:$passwordsquid"
+    echo "Danh sách IP chưa cài proxy:"
+    ip_array=($ip_list)
+    for i in "${!ip_array[@]}"; do
+        echo " [$((i+1))] ${ip_array[$i]}"
     done
+    read -p "-> Chọn số thứ tự IP để cài proxy (Enter để hủy): " choice
+    if [ -z "$choice" ]; then
+        echo -e "${RED}[!] Đã hủy thao tác, ấn Enter để quay lại.${NC}"
+        read
+        exit 1
+    fi
+    ip=${ip_array[$((choice-1))]}
+    if [ -z "$ip" ]; then
+        echo -e "${RED}[!] Vui lòng chọn IP hợp lệ, ấn Enter để quay lại.${NC}"
+        read
+        exit 1
+    fi
+    port=$((RANDOM % 64511 + 1024))
+    read -p "-> Nhập username cho proxy: " username
+    if [ -z "$username" ]; then
+        echo -e "${RED}[!] Không được để trống, ấn Enter để quay lại.${NC}"
+        read
+        exit 1
+    fi
+    read -p "-> Nhập password cho proxy: " password
+    if [ -z "$password" ]; then
+        echo -e "${RED}[!] Không được để trống, ấn Enter để quay lại.${NC}"
+        read
+        exit 1
+    fi
+    htpasswd -b -c $PASSWD_FILE "$username" "$password" >/dev/null 2>&1
+    echo "$username:$password:$(date +%F_%H:%M):ALL" >> $USERS_FILE
+    echo "auth_param basic program /usr/lib/squid/basic_ncsa_auth $PASSWD_FILE" > $SQUID_CONF
+    echo "auth_param basic realm Proxy Authentication" >> $SQUID_CONF
+    echo "acl authenticated proxy_auth REQUIRED" >> $SQUID_CONF
+    echo "http_access allow authenticated" >> $SQUID_CONF
+    echo "http_access deny all" >> $SQUID_CONF
+    echo "http_port $ip:$port" >> $SQUID_CONF
+    echo -e "${WHITE}[-] Đang cấu hình firewall và khởi động proxy...${NC}"
+    iptables -I INPUT -p tcp --dport $port -j ACCEPT >/dev/null 2>&1
+    systemctl restart squid >/dev/null 2>&1
+    echo -e "${GREEN}[+] Cài đặt proxy thành công: $ip:$port:$username:$password, ấn Enter để quay lại.${NC}"
+    read
 }
 
-# Hàm thêm tài khoản proxy
+# Function to get unadded IPs
+get_unadded_ips() {
+    ip_list=$(ip addr | grep inet | grep -v inet6 | grep -v 127.0.0.1 | awk '{print $2}' | cut -d'/' -f1)
+    added_ips=$(grep -oP '^http_port \S+:\d+' $SQUID_CONF | awk '{print $2}' | cut -d':' -f1)
+    unadded_ips=""
+    for ip in $ip_list; do
+        if ! echo "$added_ips" | grep -q "$ip"; then
+            unadded_ips="$unadded_ips $ip"
+        fi
+    done
+    echo "$unadded_ips"
+}
+
+# Function to add proxy
+add_proxy() {
+    unadded_ips=$(get_unadded_ips)
+    if [ -z "$unadded_ips" ]; then
+        echo -e "${RED}[!] Tất cả IP đã được add proxy, ấn Enter để quay lại.${NC}"
+        read
+        return
+    fi
+    echo "Danh sách IP chưa có:"
+    ip_array=($unadded_ips)
+    for i in "${!ip_array[@]}"; do
+        echo " [$((i+1))] ${ip_array[$i]}"
+    done
+    read -p "-> Chọn số thứ tự IP để add proxy (Enter để hủy): " choice
+    if [ -z "$choice" ]; then
+        echo -e "${RED}[!] Đã hủy thao tác, ấn Enter để quay lại.${NC}"
+        read
+        return
+    fi
+    # Kiểm tra phạm vi hợp lệ cho choice
+    if ! [[ "$choice" =~ ^[0-9]+$ ]] || [ "$choice" -lt 1 ] || [ "$choice" -gt "${#ip_array[@]}" ]; then
+        echo -e "${RED}[!] Lựa chọn không hợp lệ, ấn Enter để quay lại.${NC}"
+        read
+        return
+    fi
+    ip=${ip_array[$((choice-1))]}
+    if [ -z "$ip" ]; then
+        echo -e "${RED}[!] Lỗi chọn IP, ấn Enter để quay lại.${NC}"
+        read
+        return
+    fi
+    port=$((RANDOM % 64511 + 1024))
+    read -p "-> Nhập username: " username
+    if [ -z "$username" ]; then
+        echo -e "${RED}[!] Không được để trống, ấn Enter để quay lại.${NC}"
+        read
+        return
+    fi
+    # Kiểm tra trùng lặp username
+    if grep -q "^$username:" $PASSWD_FILE; then
+        echo -e "${RED}[!] Username '$username' đã tồn tại, ấn Enter để quay lại.${NC}"
+        read
+        return
+    fi
+    read -p "-> Nhập password: " password
+    if [ -z "$password" ]; then
+        echo -e "${RED}[!] Không được để trống, ấn Enter để quay lại.${NC}"
+        read
+        return
+    fi
+    htpasswd -b $PASSWD_FILE "$username" "$password" >/dev/null 2>&1
+    echo "http_port $ip:$port" >> $SQUID_CONF
+    echo -e "${WHITE}[-] Đang cấu hình firewall và khởi động proxy...${NC}"
+    iptables -I INPUT -p tcp --dport $port -j ACCEPT >/dev/null 2>&1
+    systemctl restart squid >/dev/null 2>&1
+    echo -e "${GREEN}[+] Thêm proxy thành công: $ip:$port:${username}:${password}, ấn Enter để quay lại.${NC}"
+    read
+}
+
+# Function to edit proxy
+edit_proxy() {
+    proxy_list=$(grep -oP '^http_port \S+:\d+' $SQUID_CONF | awk '{print $2}' | nl -w2 -s'. ')
+    if [ -z "$proxy_list" ]; then
+        echo -e "${RED}[!] Không có proxy nào để chỉnh sửa, ấn Enter để quay lại.${NC}"
+        read
+        return
+    fi
+    echo "Danh sách proxy hiện có:"
+    echo "$proxy_list" | while read -r line; do
+        num=$(echo "$line" | awk '{print $1}')
+        ip_port=$(echo "$line" | awk '{print $2}')
+        echo " [$num] $ip_port"
+    done
+    read -p "-> Chọn số thứ tự proxy để chỉnh sửa: " choice
+    if [ -z "$choice" ] || [ "$choice" -eq 0 ]; then
+        echo -e "${RED}[!] Lựa chọn không hợp lệ, ấn Enter để quay lại.${NC}"
+        read
+        return
+    fi
+    selected=$(echo "$proxy_list" | grep "^ *$choice\." | awk '{print $2}')
+    if [ -z "$selected" ]; then
+        echo -e "${RED}[!] Lựa chọn không hợp lệ, ấn Enter để quay lại.${NC}"
+        read
+        return
+    fi
+    old_ip=$(echo "$selected" | cut -d':' -f1)
+    old_port=$(echo "$selected" | cut -d':' -f2)
+    unadded_ips=$(get_unadded_ips)
+    if [ -n "$unadded_ips" ]; then
+        echo "Danh sách IP chưa có:"
+        ip_array=($unadded_ips)
+        for i in "${!ip_array[@]}"; do
+            echo " [$((i+1))] ${ip_array[$i]}"
+        done
+        read -p "-> Chọn số thứ tự IP mới (Enter để giữ nguyên): " choice
+        ip=${ip_array[$((choice-1))]:-$old_ip}
+    else
+        ip="$old_ip"
+        echo -e "${RED}[!] Không có IP chưa có, giữ IP cũ: $old_ip.${NC}"
+    fi
+    read -p "-> Nhập cổng mới (Enter để giữ nguyên): " port
+    port=${port:-$old_port}
+    read -p "-> Nhập username mới (Enter để giữ nguyên): " username
+    read -sp "-> Nhập password mới (Enter để giữ nguyên): " password
+    echo
+    if [ -n "$username" ] && [ -n "$password" ]; then
+        htpasswd -b $PASSWD_FILE "$username" "$password" >/dev/null 2>&1
+        echo -e "${WHITE}[-] Đang khởi động lại proxy...${NC}"
+        systemctl restart squid >/dev/null 2>&1
+    fi
+    if [ "$ip:$port" != "$old_ip:$old_port" ]; then
+        echo -e "${WHITE}[-] Đang cấu hình firewall và khởi động proxy...${NC}"
+        sed -i "s/http_port $old_ip:$old_port/http_port $ip:$port/" $SQUID_CONF
+        iptables -D INPUT -p tcp --dport $old_port -j ACCEPT >/dev/null 2>&1
+        iptables -I INPUT -p tcp --dport $port -j ACCEPT >/dev/null 2>&1
+        systemctl restart squid >/dev/null 2>&1
+    fi
+    echo -e "${GREEN}[+] Cập nhật proxy thành công: $ip:$port, ấn Enter để quay lại.${NC}"
+    read
+}
+
+# Function to delete proxy
+delete_proxy() {
+    proxy_list=$(grep -oP '^http_port \S+:\d+' $SQUID_CONF | awk '{print $2}' | nl -w2 -s'. ')
+    if [ -z "$proxy_list" ]; then
+        echo -e "${RED}[!] Không có proxy nào để xóa, ấn Enter để quay lại.${NC}"
+        read
+        return
+    fi
+    echo "Danh sách proxy hiện có:"
+    echo "$proxy_list" | while read -r line; do
+        num=$(echo "$line" | awk '{print $1}')
+        ip_port=$(echo "$line" | awk '{print $2}')
+        echo " [$num] $ip_port"
+    done
+    read -p "-> Chọn số thứ tự proxy để xóa: " choice
+    if [ -z "$choice" ] || [ "$choice" -eq 0 ]; then
+        echo -e "${RED}[!] Lựa chọn không hợp lệ, ấn Enter để quay lại.${NC}"
+        read
+        return
+    fi
+    selected=$(echo "$proxy_list" | grep "^ *$choice\." | awk '{print $2}')
+    if [ -z "$selected" ]; then
+        echo -e "${RED}[!] Lựa chọn không hợp lệ, ấn Enter để quay lại.${NC}"
+        read
+        return
+    fi
+    ip=$(echo "$selected" | cut -d':' -f1)
+    port=$(echo "$selected" | cut -d':' -f2)
+    echo -e "${WHITE}[-] Đang xóa proxy và cấu hình firewall...${NC}"
+    sed -i "/http_port $ip:$port/d" $SQUID_CONF
+    iptables -D INPUT -p tcp --dport $port -j ACCEPT >/dev/null 2>&1
+    systemctl restart squid >/dev/null 2>&1
+    echo -e "${GREEN}[+] Xóa proxy $ip:$port thành công, ấn Enter để quay lại.${NC}"
+    read
+}
+
+# Function to add user
 add_user() {
-    if [ ! -f /etc/squid/passwd ]; then
-        echo -e "${RED}Chưa cài Squid. Vui lòng cài trước.${NC}"
+    echo -e "${WHITE}[-] Lưu ý: User mới sẽ dùng chung cho tất cả proxy hiện có.${NC}"
+    read -p "-> Nhập username mới: " username
+    if [ -z "$username" ]; then
+        echo -e "${RED}[!] Không được để trống, ấn Enter để quay lại.${NC}"
+        read
         return
     fi
-    echo -e "${GREEN}Đang tạo tài khoản mới...${NC}"
-    read -p "Nhập tên người dùng: " usernamesquid
-    read -p "Nhập mật khẩu: " passwordsquid
-    htpasswd -b /etc/squid/passwd "$usernamesquid" "$passwordsquid" && echo -e "${GREEN}Thêm user $usernamesquid thành công.${NC}" || echo -e "${RED}Lỗi thêm user.${NC}"
-}
-
-# Hàm liệt kê danh sách user
-list_users() {
-    if [ -f /etc/squid/passwd ]; then
-        echo -e "${GREEN}Danh sách người dùng:${NC}"
-        grep -v '^$' /etc/squid/passwd | awk -F: '{print "  " $1}'
-    else
-        echo -e "${RED}Chưa có user.${NC}"
+    if grep -q "^$username:" $PASSWD_FILE; then
+        echo -e "${RED}[!] Username '$username' đã tồn tại, vui lòng nhập username khác.${NC}"
+        read
+        return
     fi
+    read -p "-> Nhập password mới: " password
+    if [ -z "$password" ]; then
+        echo -e "${RED}[!] Không được để trống, ấn Enter để quay lại.${NC}"
+        read
+        return
+    fi
+    htpasswd -b $PASSWD_FILE "$username" "$password" >/dev/null 2>&1
+    echo -e "${WHITE}[-] Đang khởi động lại proxy...${NC}"
+    systemctl restart squid >/dev/null 2>&1
+    echo -e "${GREEN}[+] Thêm user $username thành công, ấn Enter để quay lại.${NC}"
+    read
 }
 
-# Hàm xóa tài khoản proxy
+# Function to edit user
+edit_user() {
+    if [ ! -f "$PASSWD_FILE" ] || [ ! -s "$PASSWD_FILE" ]; then
+        echo -e "${RED}[!] Không có user nào để chỉnh sửa, ấn Enter để quay lại.${NC}"
+        read
+        return
+    fi
+    echo "Danh sách user hiện có:"
+    user_list=$(cat $PASSWD_FILE | grep -v '^#' | awk -F: '{print $1}' | nl -w2 -s' ')
+    echo "$user_list" | while read -r line; do
+        num=$(echo "$line" | awk '{print $1}')
+        user=$(echo "$line" | awk '{print $2}')
+        echo " [$num] $user"
+    done
+    read -p "-> Chọn số thứ tự user để chỉnh sửa: " choice
+    if [ -z "$choice" ] || [ "$choice" -eq 0 ]; then
+        echo -e "${RED}[!] Lựa chọn không hợp lệ, ấn Enter để quay lại.${NC}"
+        read
+        return
+    fi
+    selected=$(echo "$user_list" | grep "^ *$choice " | awk '{print $2}')
+    if [ -z "$selected" ]; then
+        echo -e "${RED}[!] Lựa chọn không hợp lệ, ấn Enter để quay lại.${NC}"
+        read
+        return
+    fi
+    old_user=$selected
+    old_pass=$(htpasswd -b -n $selected "" | cut -d':' -f2)
+    read -p "-> Nhập username mới (Enter để giữ nguyên): " username
+    read -sp "-> Nhập password mới (Enter để giữ nguyên): " password
+    echo
+    username=${username:-$old_user}
+    if [ -n "$password" ]; then
+        htpasswd -b $PASSWD_FILE "$username" "$password" >/dev/null 2>&1
+    elif [ "$username" != "$old_user" ]; then
+        htpasswd -D $PASSWD_FILE "$old_user" >/dev/null 2>&1
+        htpasswd -b $PASSWD_FILE "$username" "$old_pass" >/dev/null 2>&1
+    fi
+    if [ "$username" != "$old_user" ] || [ -n "$password" ]; then
+        echo -e "${WHITE}[-] Đang khởi động lại proxy...${NC}"
+        systemctl restart squid >/dev/null 2>&1
+    fi
+    echo -e "${GREEN}[+] Cập nhật username $username thành công, ấn Enter để quay lại.${NC}"
+    read
+}
+
+# Function to delete user
 delete_user() {
-    if [ ! -f /etc/squid/passwd ]; then
-        echo -e "${RED}Chưa cài Squid.${NC}"
+    if [ ! -f "$PASSWD_FILE" ] || [ ! -s "$PASSWD_FILE" ]; then
+        echo -e "${RED}[!] Không có user nào để xóa, ấn Enter để quay lại.${NC}"
+        read
         return
     fi
-    echo -e "${GREEN}Đang xóa user...${NC}"
-    list_users
-    read -p "Nhập tên user cần xóa: " usernamesquid
-    if grep -q "^$usernamesquid:" /etc/squid/passwd; then
-        htpasswd -D /etc/squid/passwd "$usernamesquid" && echo -e "${GREEN}Xóa user $usernamesquid thành công.${NC}" || echo -e "${RED}Lỗi xóa user.${NC}"
-    else
-        echo -e "${RED}Không tìm thấy user $usernamesquid.${NC}"
-    fi
-}
-
-# Hàm thay đổi cổng proxy
-change_port() {
-    if ! check_squid_status; then
-        echo -e "${RED}Chưa cài Squid.${NC}"
+    echo "Danh sách user hiện có:"
+    user_list=$(cat $PASSWD_FILE | grep -v '^#' | awk -F: '{print $1}' | nl -w2 -s' ')
+    echo "$user_list" | while read -r line; do
+        num=$(echo "$line" | awk '{print $1}')
+        user=$(echo "$line" | awk '{print $2}')
+        echo " [$num] $user"
+    done
+    read -p "-> Chọn số thứ tự user để xóa: " choice
+    if [ -z "$choice" ] || [ "$choice" -eq 0 ]; then
+        echo -e "${RED}[!] Lựa chọn không hợp lệ, ấn Enter để quay lại.${NC}"
+        read
         return
     fi
-    SOK_OS=$(check_os)
-    OLD_PORT=$(grep -E "^http_port" /etc/squid/squid.conf | awk '{print $2}' 2>/dev/null || echo "3128")
-    NEW_PORT=$(generate_random_port)
-    echo -e "${GREEN}Đang thay cổng từ $OLD_PORT thành $NEW_PORT...${NC}"
-
-    sed -i "s/http_port $OLD_PORT/http_port $NEW_PORT/" /etc/squid/squid.conf || { echo -e "${RED}Lỗi cập nhật config.${NC}"; return; }
-
-    if [[ $SOK_OS == centos* || $SOK_OS == almalinux* ]]; then
-        if [ -f /usr/bin/firewall-cmd ]; then
-            firewall-cmd --zone=public --permanent --remove-port=$OLD_PORT/tcp >/dev/null 2>&1
-            firewall-cmd --zone=public --permanent --add-port=$NEW_PORT/tcp >/dev/null 2>&1
-            firewall-cmd --reload >/dev/null 2>&1 || echo -e "${RED}Lỗi reload firewall.${NC}"
-        fi
-    else
-        if [ -f /sbin/iptables ]; then
-            iptables -D INPUT -p tcp --dport $OLD_PORT -j ACCEPT 2>/dev/null
-            iptables -I INPUT -p tcp --dport $NEW_PORT -j ACCEPT
-            iptables-save >/dev/null 2>&1 || echo -e "${RED}Lỗi lưu iptables.${NC}"
-        fi
+    selected=$(echo "$user_list" | grep "^ *$choice " | awk '{print $2}')
+    if [ -z "$selected" ]; then
+        echo -e "${RED}[!] Lựa chọn không hợp lệ, ấn Enter để quay lại.${NC}"
+        read
+        return
     fi
-
-    systemctl restart squid || { echo -e "${RED}Lỗi khởi động lại squid.${NC}"; return; }
-    echo -e "${GREEN}Thay cổng thành công: $NEW_PORT${NC}"
+    echo -e "${WHITE}[-] Đang xóa user và khởi động lại proxy...${NC}"
+    htpasswd -D $PASSWD_FILE "$selected" >/dev/null 2>&1
+    if [ $? -ne 0 ]; then
+        echo -e "${RED}[!] Lỗi khi xóa user $selected từ $PASSWD_FILE, ấn Enter để quay lại.${NC}"
+        read
+    else
+        echo -e "${GREEN}[+] Xóa user $selected thành công, ấn Enter để quay lại.${NC}"
+        read
+    fi
+    echo -e "${WHITE}[-] Đang khởi động lại proxy...${NC}"
+    systemctl restart squid >/dev/null 2>&1
 }
 
-# Hàm hiển thị menu
-show_menu() {
-    clear
-    echo -e "${GREEN}=== Menu Quản Lý Squid Proxy ===${NC}"
-    echo "1. Cài đặt Squid Proxy"
-    echo "2. Thêm người dùng Proxy"
-    echo "3. Xóa người dùng Proxy"
-    echo "4. Thay đổi cổng Proxy"
-    echo "5. Xem trạng thái Proxy"
-    echo "0. Thoát"
-    read -p "Chọn một tùy chọn [0-5]: " choice
-    case $choice in
-        1) install_squid ;;
-        2) add_user ;;
-        3) delete_user ;;
-        4) change_port ;;
-        5) check_squid_status ;;
-        0) exit 0 ;;
-        *) echo -e "${RED}Tùy chọn không hợp lệ!${NC}" ;;
-    esac
-    read -p "Nhấn Enter để tiếp tục..."
+# Function to restart proxy
+restart_proxy() {
+    echo -e "${WHITE}[-] Đang khởi động lại proxy...${NC}"
+    systemctl restart squid >/dev/null 2>&1
+    if systemctl is-active --quiet squid; then
+        echo -e "${GREEN}[+] Khởi động lại proxy thành công, ấn Enter để quay lại.${NC}"
+    else
+        echo -e "${RED}[!] Lỗi khi khởi động lại proxy, ấn Enter để quay lại.${NC}"
+    fi
+    read
 }
 
-# Chạy script
-check_root
-install_dependencies
-download_sok_find_os
+# Function to view proxy list
+view_proxy_list() {
+    proxy_list=$(grep -oP '^http_port \S+:\d+' $SQUID_CONF | awk '{print $2}' | nl -w2 -s'. ')
+    if [ -z "$proxy_list" ]; then
+        echo -e "${RED}[!] Không có proxy nào, ấn Enter để quay lại.${NC}"
+    else
+        echo "Danh sách proxy hiện có:"
+        echo "$proxy_list" | while read -r line; do
+            num=$(echo "$line" | awk '{print $1}')
+            ip_port=$(echo "$line" | awk '{print $2}')
+            echo " [$num] $ip_port"
+        done
+        echo -e "${WHITE}[!] ấn Enter để quay lại.${NC}"
+    fi
+    read
+}
+
+# Function to view unadded IPs
+view_unadded_ips() {
+    unadded_ips=$(get_unadded_ips)
+    count=$(echo "$unadded_ips" | wc -w)
+    if [ -z "$unadded_ips" ]; then
+        echo -e "${RED}[!] Không có IP, ấn Enter để quay lại.${NC}"
+    else
+        echo "Danh sách IP chưa có (Tổng: $count):"
+        ip_array=($unadded_ips)
+        for i in "${!ip_array[@]}"; do
+            echo " [$((i+1))] ${ip_array[$i]}"
+        done
+        echo -e "${WHITE}[!] ấn Enter để quay lại.${NC}"
+    fi
+    read
+}
+
+# Function to view user list
+view_user_list() {
+    if [ ! -f "$PASSWD_FILE" ] || [ ! -s "$PASSWD_FILE" ]; then
+        echo -e "${RED}[!] Không có user nào, ấn Enter để quay lại.${NC}"
+    else
+        echo "Danh sách user hiện có:"
+        user_list=$(cat $PASSWD_FILE | grep -v '^#' | awk -F: '{print $1}' | nl -w2 -s' ')
+        echo "$user_list" | while read -r line; do
+            num=$(echo "$line" | awk '{print $1}')
+            user=$(echo "$line" | awk '{print $2}')
+            echo " [$num] $user"
+        done
+        echo -e "${WHITE}[!] ấn Enter để quay lại.${NC}"
+    fi
+    read
+}
+
+# Main menu
+check_and_install_squid
 while true; do
-    show_menu
+    clear
+    display_header
+    center_text "Menu Quản Lý Proxy"
+    echo "[1] Quản lý Proxy"
+    echo "[2] Quản lý User"
+    echo "[3] Khởi động lại Proxy"
+    echo "[4] Xem danh sách"
+    echo "[0] Thoát"
+    read -p "-> Chọn một tùy chọn [0-4]: " choice
+    case $choice in
+        1)
+            while true; do
+                clear
+                display_header
+                center_text "Quản lý Proxy"
+                echo "[1] Add Proxy"
+                echo "[2] Edit Proxy"
+                echo "[3] Xóa Proxy"
+                echo "[0] Quay lại"
+                read -p "-> Chọn một tùy chọn [0-3]: " sub_choice
+                case $sub_choice in
+                    1) add_proxy ;;
+                    2) edit_proxy ;;
+                    3) delete_proxy ;;
+                    0) break ;;
+                    *) echo -e "${RED}[!] Lựa chọn không hợp lệ, ấn Enter để quay lại...${NC}"; read ;;
+                esac
+            done
+            ;;
+        2)
+            while true; do
+                clear
+                display_header
+                center_text "Quản lý User"
+                echo "[1] Add User"
+                echo "[2] Edit User"
+                echo "[3] Xóa User"
+                echo "[0] Quay lại"
+                read -p "-> Chọn một tùy chọn [0-3]: " sub_choice
+                case $sub_choice in
+                    1) add_user ;;
+                    2) edit_user ;;
+                    3) delete_user ;;
+                    0) break ;;
+                    *) echo -e "${RED}[!] Lựa chọn không hợp lệ, ấn Enter để quay lại...${NC}"; read ;;
+                esac
+            done
+            ;;
+        3) restart_proxy ;;
+        4)
+            while true; do
+                clear
+                display_header
+                center_text "Xem danh sách"
+                echo "[1] Xem danh sách proxy hiện có"
+                echo "[2] Xem danh sách IP chưa có"
+                echo "[3] Xem danh sách user hiện có"
+                echo "[0] Quay lại"
+                read -p "-> Chọn một tùy chọn [0-3]: " sub_choice
+                case $sub_choice in
+                    1) view_proxy_list ;;
+                    2) view_unadded_ips ;;
+                    3) view_user_list ;;
+                    0) break ;;
+                    *) echo -e "${RED}[!] Lựa chọn không hợp lệ, ấn Enter để quay lại...${NC}"; read ;;
+                esac
+            done
+            ;;
+        0) exit 0 ;;
+        *) echo -e "${RED}[!] Lựa chọn không hợp lệ, ấn Enter để tiếp tục...${NC}"; read ;;
+    esac
 done

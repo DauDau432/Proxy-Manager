@@ -1,5 +1,4 @@
 #!/bin/bash
-
 # Màu sắc cho giao diện
 GREEN='\033[0;32m'
 RED='\033[0;31m'
@@ -9,112 +8,90 @@ NC='\033[0m'
 check_root() {
     if [ "$(whoami)" != "root" ]; then
         echo -e "${RED}LỖI: Bạn cần chạy script với quyền root hoặc sử dụng sudo.${NC}"
-        echo -e ""
-        read -p "Nhấn Enter để tiếp tục..."
         exit 1
     fi
 }
 
-# Hàm sinh cổng ngẫu nhiên
-generate_random_port() {
-    if ! command -v netstat >/dev/null 2>&1; then
-        echo -e "${GREEN}Đang cài đặt net-tools, vui lòng chờ...${NC}"
-        apt install net-tools -y >/dev/null 2>&1 || yum install net-tools -y >/dev/null 2>&1 || {
-            echo -e "${RED}Không thể cài net-tools. Vui lòng cài thủ công: 'apt install net-tools' hoặc 'yum install net-tools'.${NC}"
-            echo -e ""
-            read -p "Nhấn Enter để tiếp tục..."
+# Hàm lấy danh sách IPv4
+get_ips() {
+    mapfile -t IPS < <(ip -4 addr show | grep inet | grep -v 127.0.0.1 | awk '{print $2}' | cut -d'/' -f1)
+    if [ ${#IPS[@]} -eq 0 ]; then
+        echo -e "${RED}Không tìm thấy địa chỉ IPv4.${NC}"
+        exit 1
+    fi
+}
+
+# Hàm cài phụ thuộc chung
+install_dependencies() {
+    echo -e "${GREEN}Đang cài đặt các gói phụ thuộc cơ bản...${NC}"
+    if command -v apt >/dev/null 2>&1; then
+        apt update >/dev/null 2>&1
+        apt install wget net-tools jq -y >/dev/null 2>&1 || {
+            echo -e "${RED}Không thể cài wget, net-tools hoặc jq qua apt.${NC}"
             exit 1
         }
+    elif command -v yum >/dev/null 2>&1; then
+        yum install wget net-tools jq -y >/dev/null 2>&1 || {
+            echo -e "${RED}Không thể cài wget, net-tools hoặc jq qua yum.${NC}"
+            exit 1
+        }
+    elif command -v dnf >/dev/null 2>&1; then
+        dnf install wget net-tools jq -y >/dev/null 2>&1 || {
+            echo -e "${RED}Không thể cài wget, net-tools hoặc jq qua dnf.${NC}"
+            exit 1
+        }
+    else
+        echo -e "${RED}Không tìm thấy trình quản lý gói (apt/yum/dnf).${NC}"
+        exit 1
     fi
+}
+
+# Hàm tải sok-find-os
+download_sok_find_os() {
+    wget -q --no-check-certificate -O /usr/local/bin/sok-find-os https://raw.githubusercontent.com/serverok/squid-proxy-installer/master/sok-find-os.sh >/dev/null 2>&1
+    chmod 755 /usr/local/bin/sok-find-os
+    if [ ! -f /usr/local/bin/sok-find-os ]; then
+        echo -e "${RED}Không thể tải sok-find-os.${NC}"
+        exit 1
+    fi
+}
+
+# Hàm kiểm tra hệ điều hành
+check_os() {
+    SOK_OS=$(/usr/local/bin/sok-find-os)
+    if [ "$SOK_OS" == "ERROR" ]; then
+        echo -e "${RED}Hệ điều hành không được hỗ trợ.${NC}"
+        exit 1
+    fi
+    echo "$SOK_OS"
+}
+
+# Hàm sinh cổng ngẫu nhiên
+generate_random_port() {
     local port
+    local attempts=0
     while true; do
         port=$(shuf -i 10000-65535 -n 1)
         if ! netstat -tuln | grep -q ":$port "; then
             echo "$port"
             break
         fi
+        attempts=$((attempts+1))
+        if [ $attempts -gt 10 ]; then
+            echo -e "${RED}Không tìm được cổng trống sau 10 lần thử.${NC}"
+            exit 1
+        fi
     done
 }
 
-# Hàm kiểm tra hệ điều hành
-check_os() {
-    echo -e "${GREEN}Đang kiểm tra hệ điều hành...${NC}"
-    if [ -f /etc/redhat-release ]; then
-        OS=$(cat /etc/redhat-release)
-        if [[ $OS == *"CentOS release 7"* ]]; then
-            echo "centos7"
-        elif [[ $OS == *"CentOS release 8"* ]]; then
-            echo "centos8"
-        elif [[ $OS == *"CentOS Stream release 8"* ]]; then
-            echo "centos8s"
-        elif [[ $OS == *"CentOS Stream release 9"* ]]; then
-            echo "centos9"
-        elif [[ $OS == *"AlmaLinux release 8"* ]]; then
-            echo "almalinux8"
-        elif [[ $OS == *"AlmaLinux release 9"* ]]; then
-            echo "almalinux9"
-        else
-            echo -e "${RED}Hệ điều hành CentOS/AlmaLinux không được hỗ trợ: $OS${NC}"
-            echo -e ""
-            read -p "Nhấn Enter để tiếp tục..."
-            exit 1
-        fi
-    elif [ -f /etc/os-release ]; then
-        OS=$(grep -E '^PRETTY_NAME=' /etc/os-release | cut -d= -f2 | tr -d \")
-        if [[ $OS == *"Ubuntu 22.04"* ]]; then
-            echo "ubuntu2204"
-        elif [[ $OS == *"Ubuntu 20.04"* ]]; then
-            echo "ubuntu2004"
-        elif [[ $OS == *"Ubuntu 18.04"* ]]; then
-            echo "ubuntu1804"
-        elif [[ $OS == *"Ubuntu 16.04"* ]]; then
-            echo "ubuntu1604"
-        elif [[ $OS == *"Ubuntu 14.04"* ]]; then
-            echo "ubuntu1404"
-        elif [[ $OS == *"Debian GNU/Linux 8"* ]]; then
-            echo "debian8"
-        elif [[ $OS == *"Debian GNU/Linux 9"* ]]; then
-            echo "debian9"
-        elif [[ $OS == *"Debian GNU/Linux 10"* ]]; then
-            echo "debian10"
-        elif [[ $OS == *"Debian GNU/Linux 11"* ]]; then
-            echo "debian11"
-        elif [[ $OS == *"Debian GNU/Linux 12"* ]]; then
-            echo "debian12"
-        else
-            echo -e "${RED}Hệ điều hành không được hỗ trợ: $OS${NC}"
-            echo -e ""
-            read -p "Nhấn Enter để tiếp tục..."
-            exit 1
-        fi
-    elif command -v lsb_release >/dev/null 2>&1; then
-        OS=$(lsb_release -d | cut -f2)
-        echo -e "${RED}Hệ điều hành không được hỗ trợ (lsb_release): $OS${NC}"
-        echo -e ""
-        read -p "Nhấn Enter để tiếp tục..."
-        exit 1
-    else
-        echo -e "${RED}Không thể xác định hệ điều hành.${NC}"
-        echo -e ""
-        read -p "Nhấn Enter để tiếp tục..."
-        exit 1
-    fi
-}
-
-# Hàm kiểm tra trạng thái Squid và hiển thị thông tin proxy
+# Hàm kiểm tra trạng thái Squid
 check_squid_status() {
     echo -e "${GREEN}=== Kiểm tra trạng thái Squid Proxy ===${NC}"
     if [[ -d /etc/squid/ || -d /etc/squid3/ ]]; then
         echo -e "${GREEN}Squid Proxy đã được cài đặt.${NC}"
-        echo -e ""
-        # Lấy IP công cộng
-        ip="Không lấy được IP"
-        if command -v jq >/dev/null 2>&1; then
-            echo -e "${GREEN}Đang lấy IP công cộng...${NC}"
-            response=$(curl -s https://api.myip.com)
-            ip=$(echo "$response" | jq -r '.ip' 2>/dev/null || echo "Không lấy được IP")
-        fi
-        # Lấy cổng từ tệp cấu hình
+        # Lấy danh sách IP
+        get_ips
+        # Lấy cổng
         if [ -f /etc/squid/squid.conf ]; then
             port=$(grep -E "^http_port" /etc/squid/squid.conf | awk '{print $2}' || echo "Không xác định")
         elif [ -f /etc/squid3/squid.conf ]; then
@@ -122,33 +99,26 @@ check_squid_status() {
         else
             port="Không xác định"
         fi
-        # Lấy danh sách user
+        # Hiển thị thông tin
         echo -e "${GREEN}Thông tin proxy hiện tại:${NC}"
-        echo -e "  IP: $ip"
-        echo -e "  Cổng: $port"
+        for ip in "${IPS[@]}"; do
+            echo -e " IP: $ip, Cổng: $port"
+        done
         if [ -f /etc/squid/passwd ]; then
-            echo -e "  Danh sách người dùng (mật khẩu được nhập khi tạo):"
-            grep -v '^$' /etc/squid/passwd | awk -F: '{print "    " $1}'
+            echo -e " Danh sách người dùng:"
+            grep -v '^$' /etc/squid/passwd | awk -F: '{print "  " $1}'
         else
-            echo -e "  Không có người dùng nào."
+            echo -e " Không có người dùng nào."
         fi
-        # Kiểm tra trạng thái dịch vụ
         if systemctl is-active squid >/dev/null 2>&1; then
-            echo -e "  Trạng thái dịch vụ: ${GREEN}Đang chạy${NC}"
+            echo -e " Trạng thái dịch vụ: ${GREEN}Đang chạy${NC}"
         else
-            echo -e "  Trạng thái dịch vụ: ${RED}Không chạy${NC}"
+            echo -e " Trạng thái dịch vụ: ${RED}Không chạy${NC}"
         fi
-        echo -e ""
-        echo -e "${GREEN}Để kiểm tra proxy, sử dụng lệnh:${NC}"
-        echo -e "  curl --proxy http://<username>:<password>@$ip:$port https://www.google.com"
-        echo -e "  Thay <username> và <password> bằng thông tin đã nhập khi tạo user."
-        echo -e ""
-        read -p "Nhấn Enter để tiếp tục..."
+        echo -e "${GREEN}Kiểm tra proxy: curl --proxy http://<user>:<pass>@<IP>:$port https://www.google.com${NC}"
         return 0
     else
         echo -e "${RED}Squid Proxy chưa được cài đặt.${NC}"
-        echo -e ""
-        read -p "Nhấn Enter để tiếp tục..."
         return 1
     fi
 }
@@ -156,111 +126,72 @@ check_squid_status() {
 # Hàm cài đặt Squid
 install_squid() {
     if check_squid_status; then
+        echo -e "${RED}Squid đã được cài đặt. Chạy 'squid-uninstall' để gỡ trước khi cài lại.${NC}"
         return
     fi
     SOK_OS=$(check_os)
     PORT=$(generate_random_port)
     echo -e "${GREEN}Đang cài đặt Squid Proxy trên cổng $PORT...${NC}"
-    echo -e ""
 
-    # Cài đặt công cụ cần thiết
-    echo -e "${GREEN}Đang cài đặt các gói phụ thuộc, vui lòng chờ...${NC}"
-    yum install wget -y >/dev/null 2>&1 || apt install wget -y >/dev/null 2>&1 || {
-        echo -e "${RED}Không thể cài wget. Vui lòng cài thủ công: 'apt install wget' hoặc 'yum install wget'.${NC}"
-        read -p "Nhấn Enter để tiếp tục..."
-        exit 1
-    }
-    apt install net-tools -y >/dev/null 2>&1 || yum install net-tools -y >/dev/null 2>&1 || {
-        echo -e "${RED}Không thể cài net-tools. Vui lòng cài thủ công: 'apt install net-tools' hoặc 'yum install net-tools'.${NC}"
-        read -p "Nhấn Enter để tiếp tục..."
-        exit 1
-    }
-    # Cố gắng cài jq, nếu thất bại thì bỏ qua
-    if ! apt install jq -y >/dev/null 2>&1; then
-        echo -e "${GREEN}Cố gắng thêm kho universe và cài jq...${NC}"
-        add-apt-repository universe -y >/dev/null 2>&1
-        apt update >/dev/null 2>&1
-        apt install jq -y >/dev/null 2>&1 || {
-            echo -e "${GREEN}Cài jq qua snap...${NC}"
-            snap install jq >/dev/null 2>&1 || {
-                echo -e "${RED}Không thể cài jq, tiếp tục mà không sử dụng jq.${NC}"
-            }
-        }
-    fi
-
-    # Tạo thư mục /etc/squid nếu chưa có
-    echo -e "${GREEN}Đang cấu hình thư mục Squid...${NC}"
-    mkdir -p /etc/squid
-
-    # Tải các script bổ trợ
-    echo -e "${GREEN}Đang tải các script bổ trợ...${NC}"
+    # Tải script bổ trợ
     wget -q --no-check-certificate -O /usr/local/bin/squid-uninstall https://raw.githubusercontent.com/serverok/squid-proxy-installer/master/squid-uninstall.sh >/dev/null 2>&1
     wget -q --no-check-certificate -O /usr/local/bin/squid-add-user https://raw.githubusercontent.com/serverok/squid-proxy-installer/master/squid-add-user.sh >/dev/null 2>&1
     chmod 755 /usr/local/bin/squid-uninstall /usr/local/bin/squid-add-user
 
-    # Cài đặt Squid theo hệ điều hành
-    echo -e "${GREEN}Đang cài đặt Squid, vui lòng chờ...${NC}"
+    # Cài đặt Squid theo OS
     case $SOK_OS in
-        ubuntu2204|ubuntu2004|ubuntu1804|ubuntu1604)
-            apt install apache2-utils squid -y >/dev/null 2>&1 || {
-                echo -e "${RED}Lỗi cài đặt squid. Vui lòng kiểm tra kho lưu trữ hoặc cài thủ công: 'apt install squid'.${NC}"
-                read -p "Nhấn Enter để tiếp tục..."
-                exit 1
-            }
+        ubuntu2204|ubuntu2004|ubuntu1804|ubuntu1604|ubuntu1404)
+            apt install apache2-utils squid -y >/dev/null 2>&1 || { echo -e "${RED}Lỗi cài squid.${NC}"; exit 1; }
+            mkdir -p /etc/squid
             touch /etc/squid/passwd /etc/squid/blacklist.acl
             mv /etc/squid/squid.conf /etc/squid/squid.conf.bak 2>/dev/null
-            wget -q --no-check-certificate -O /etc/squid/squid.conf https://raw.githubusercontent.com/serverok/squid-proxy-installer/master/squid.conf >/dev/null 2>&1
+            wget -q --no-check-certificate -O /etc/squid/squid.conf https://raw.githubusercontent.com/serverok/squid-proxy-installer/master/conf/ubuntu-2204.conf >/dev/null 2>&1 || { echo -e "${RED}Lỗi tải config.${NC}"; exit 1; }
             sed -i "s/http_port 3128/http_port $PORT/" /etc/squid/squid.conf
-            iptables -I INPUT -p tcp --dport $PORT -j ACCEPT
-            iptables-save >/dev/null 2>&1
+            if [ -f /sbin/iptables ]; then
+                iptables -I INPUT -p tcp --dport $PORT -j ACCEPT
+                iptables-save >/dev/null 2>&1 || echo -e "${RED}Lỗi lưu iptables.${NC}"
+            fi
             systemctl enable squid >/dev/null 2>&1
-            systemctl restart squid || {
-                echo -e "${RED}Lỗi khởi động squid. Vui lòng kiểm tra dịch vụ: 'systemctl status squid'.${NC}"
-                read -p "Nhấn Enter để tiếp tục..."
-                exit 1
-            }
+            systemctl restart squid || { echo -e "${RED}Lỗi khởi động squid.${NC}"; exit 1; }
             ;;
-        debian11|debian12)
-            apt install apache2-utils squid -y >/dev/null 2>&1 || {
-                echo -e "${RED}Lỗi cài đặt squid. Vui lòng kiểm tra kho lưu trữ hoặc cài thủ công: 'apt install squid'.${NC}"
-                read -p "Nhấn Enter để tiếp tục..."
-                exit 1
-            }
+        debian12|debian11|debian10|debian9|debian8)
+            apt install apache2-utils squid -y >/dev/null 2>&1 || { echo -e "${RED}Lỗi cài squid.${NC}"; exit 1; }
+            rm -rf /etc/squid >/dev/null 2>&1
+            mkdir -p /etc/squid
             touch /etc/squid/passwd /etc/squid/blacklist.acl
-            rm -f /etc/squid/squid.conf
-            wget -q --no-check-certificate -O /etc/squid/squid.conf https://raw.githubusercontent.com/serverok/squid-proxy-installer/master/squid.conf >/dev/null 2>&1
-            sed -i "s/http_port 3128/http_port $PORT/" /etc/squid/squid.conf
-            iptables -I INPUT -p tcp --dport $PORT -j ACCEPT
-            iptables-save >/dev/null 2>&1
+            if [ "$SOK_OS" == "debian12" ]; then
+                mkdir -p /etc/squid/conf.d
+                wget -q --no-check-certificate -O /etc/squid/conf.d/serverok.conf https://raw.githubusercontent.com/serverok/squid-proxy-installer/master/conf/debian12.conf >/dev/null 2>&1
+            else
+                wget -q --no-check-certificate -O /etc/squid/squid.conf https://raw.githubusercontent.com/serverok/squid-proxy-installer/master/squid.conf >/dev/null 2>&1
+            fi
+            sed -i "s/http_port 3128/http_port $PORT/" /etc/squid/squid.conf 2>/dev/null
+            if [ -f /sbin/iptables ]; then
+                iptables -I INPUT -p tcp --dport $PORT -j ACCEPT
+                iptables-save >/dev/null 2>&1 || echo -e "${RED}Lỗi lưu iptables.${NC}"
+            fi
             systemctl enable squid >/dev/null 2>&1
-            systemctl restart squid || {
-                echo -e "${RED}Lỗi khởi động squid. Vui lòng kiểm tra dịch vụ: 'systemctl status squid'.${NC}"
-                read -p "Nhấn Enter để tiếp tục..."
-                exit 1
-            }
+            systemctl restart squid || { echo -e "${RED}Lỗi khởi động squid.${NC}"; exit 1; }
             ;;
-        centos7|centos8|almalinux8|almalinux9|centos9)
-            yum install squid httpd-tools -y >/dev/null 2>&1 || {
-                echo -e "${RED}Lỗi cài đặt squid. Vui lòng kiểm tra kho lưu trữ hoặc cài thủ công: 'yum install squid'.${NC}"
-                read -p "Nhấn Enter để tiếp tục..."
-                exit 1
-            }
+        centos7|centos8|centos8s|centos9|almalinux8|almalinux9)
+            if [ "$SOK_OS" == "centos7" ]; then
+                yum install squid httpd-tools -y >/dev/null 2>&1 || { echo -e "${RED}Lỗi cài squid.${NC}"; exit 1; }
+            else
+                dnf install squid httpd-tools -y >/dev/null 2>&1 || yum install squid httpd-tools -y >/dev/null 2>&1 || { echo -e "${RED}Lỗi cài squid.${NC}"; exit 1; }
+            fi
             touch /etc/squid/blacklist.acl
             mv /etc/squid/squid.conf /etc/squid/squid.conf.bak 2>/dev/null
-            wget -q --no-check-certificate -O /etc/squid/squid.conf https://raw.githubusercontent.com/serverok/squid-proxy-installer/master/conf/squid-centos7.conf >/dev/null 2>&1
+            wget -q --no-check-certificate -O /etc/squid/squid.conf https://raw.githubusercontent.com/serverok/squid-proxy-installer/master/conf/squid-centos7.conf >/dev/null 2>&1 || { echo -e "${RED}Lỗi tải config.${NC}"; exit 1; }
             sed -i "s/http_port 3128/http_port $PORT/" /etc/squid/squid.conf
-            firewall-cmd --zone=public --permanent --add-port=$PORT/tcp >/dev/null 2>&1
-            firewall-cmd --reload >/dev/null 2>&1
+            if [ -f /usr/bin/firewall-cmd ]; then
+                firewall-cmd --zone=public --permanent --add-port=$PORT/tcp >/dev/null 2>&1
+                firewall-cmd --reload >/dev/null 2>&1 || echo -e "${RED}Lỗi reload firewall.${NC}"
+            fi
             systemctl enable squid >/dev/null 2>&1
-            systemctl restart squid || {
-                echo -e "${RED}Lỗi khởi động squid. Vui lòng kiểm tra dịch vụ: 'systemctl status squid'.${NC}"
-                read -p "Nhấn Enter để tiếp tục..."
-                exit 1
-            }
+            systemctl restart squid || { echo -e "${RED}Lỗi khởi động squid.${NC}"; exit 1; }
             ;;
         *)
             echo -e "${RED}Hệ điều hành không được hỗ trợ: $SOK_OS${NC}"
-            read -p "Nhấn Enter để tiếp tục..."
             exit 1
             ;;
     esac
@@ -269,151 +200,83 @@ install_squid() {
     echo -e "${GREEN}Đang tạo tài khoản proxy...${NC}"
     read -p "Nhập tên người dùng proxy: " usernamesquid
     read -p "Nhập mật khẩu proxy: " passwordsquid
-    htpasswd -b -c /etc/squid/passwd "$usernamesquid" "$passwordsquid" && {
-        echo -e "${GREEN}Thêm người dùng $usernamesquid thành công.${NC}"
-    } || {
-        echo -e "${RED}Lỗi khi thêm người dùng $usernamesquid. Vui lòng kiểm tra quyền truy cập tệp /etc/squid/passwd.${NC}"
-        read -p "Nhấn Enter để tiếp tục..."
-        exit 1
-    }
+    htpasswd -b -c /etc/squid/passwd "$usernamesquid" "$passwordsquid" || { echo -e "${RED}Lỗi thêm user.${NC}"; exit 1; }
 
-    # Lấy IP công cộng
-    ip="Không lấy được IP"
-    if command -v jq >/dev/null 2>&1; then
-        echo -e "${GREEN}Đang lấy IP công cộng...${NC}"
-        response=$(curl -s https://api.myip.com)
-        ip=$(echo "$response" | jq -r '.ip' 2>/dev/null || echo "Không lấy được IP")
-    fi
-    echo -e ""
-    echo -e "${GREEN}Cài đặt Proxy HTTP/HTTPS thành công:${NC}"
-    echo -e "  Proxy: $ip:$PORT:$usernamesquid:$passwordsquid"
-    echo -e ""
-    read -p "Nhấn Enter để tiếp tục..."
+    # Hiển thị thông tin proxy
+    get_ips
+    echo -e "${GREEN}Cài đặt Proxy thành công:${NC}"
+    for ip in "${IPS[@]}"; do
+        echo -e " Proxy: $ip:$PORT:$usernamesquid:$passwordsquid"
+    done
 }
 
 # Hàm thêm tài khoản proxy
 add_user() {
     if [ ! -f /etc/squid/passwd ]; then
-        echo -e "${RED}Tệp /etc/squid/passwd không tồn tại. Vui lòng cài đặt Squid trước.${NC}"
-        echo -e ""
-        read -p "Nhấn Enter để tiếp tục..."
+        echo -e "${RED}Chưa cài Squid. Vui lòng cài trước.${NC}"
         return
     fi
-    echo -e "${GREEN}Đang tạo tài khoản proxy mới...${NC}"
-    read -p "Nhập tên người dùng proxy mới: " usernamesquid
-    read -p "Nhập mật khẩu proxy mới: " passwordsquid
-    htpasswd -b /etc/squid/passwd "$usernamesquid" "$passwordsquid" && {
-        echo -e "${GREEN}Thêm người dùng $usernamesquid thành công.${NC}"
-    } || {
-        echo -e "${RED}Lỗi khi thêm người dùng $usernamesquid. Vui lòng kiểm tra quyền truy cập tệp /etc/squid/passwd.${NC}"
-    }
-    echo -e ""
-    read -p "Nhấn Enter để tiếp tục..."
+    echo -e "${GREEN}Đang tạo tài khoản mới...${NC}"
+    read -p "Nhập tên người dùng: " usernamesquid
+    read -p "Nhập mật khẩu: " passwordsquid
+    htpasswd -b /etc/squid/passwd "$usernamesquid" "$passwordsquid" && echo -e "${GREEN}Thêm user $usernamesquid thành công.${NC}" || echo -e "${RED}Lỗi thêm user.${NC}"
 }
 
 # Hàm liệt kê danh sách user
 list_users() {
     if [ -f /etc/squid/passwd ]; then
-        echo -e "${GREEN}Danh sách người dùng proxy hiện có:${NC}"
-        grep -v '^$' /etc/squid/passwd | awk -F: '{print "    " $1}'
+        echo -e "${GREEN}Danh sách người dùng:${NC}"
+        grep -v '^$' /etc/squid/passwd | awk -F: '{print "  " $1}'
     else
-        echo -e "${RED}Không tìm thấy tệp /etc/squid/passwd. Chưa có người dùng nào được tạo.${NC}"
+        echo -e "${RED}Chưa có user.${NC}"
     fi
 }
 
 # Hàm xóa tài khoản proxy
 delete_user() {
     if [ ! -f /etc/squid/passwd ]; then
-        echo -e "${RED}Tệp /etc/squid/passwd không tồn tại. Vui lòng cài đặt Squid trước.${NC}"
-        echo -e ""
-        read -p "Nhấn Enter để tiếp tục..."
+        echo -e "${RED}Chưa cài Squid.${NC}"
         return
     fi
-    echo -e "${GREEN}Đang xóa người dùng proxy...${NC}"
+    echo -e "${GREEN}Đang xóa user...${NC}"
     list_users
-    read -p "Nhập tên người dùng cần xóa: " usernamesquid
+    read -p "Nhập tên user cần xóa: " usernamesquid
     if grep -q "^$usernamesquid:" /etc/squid/passwd; then
-        htpasswd -D /etc/squid/passwd "$usernamesquid" && {
-            echo -e "${GREEN}Xóa người dùng $usernamesquid thành công.${NC}"
-        } || {
-            echo -e "${RED}Lỗi khi xóa người dùng $usernamesquid. Vui lòng kiểm tra quyền truy cập tệp /etc/squid/passwd.${NC}"
-        }
+        htpasswd -D /etc/squid/passwd "$usernamesquid" && echo -e "${GREEN}Xóa user $usernamesquid thành công.${NC}" || echo -e "${RED}Lỗi xóa user.${NC}"
     else
-        echo -e "${RED}Không tìm thấy người dùng $usernamesquid.${NC}"
+        echo -e "${RED}Không tìm thấy user $usernamesquid.${NC}"
     fi
-    echo -e ""
-    read -p "Nhấn Enter để tiếp tục..."
 }
 
 # Hàm thay đổi cổng proxy
 change_port() {
     if ! check_squid_status; then
-        echo -e "${RED}Squid Proxy chưa được cài đặt. Vui lòng cài đặt trước khi thay đổi cổng.${NC}"
-        echo -e ""
-        read -p "Nhấn Enter để tiếp tục..."
+        echo -e "${RED}Chưa cài Squid.${NC}"
         return
     fi
     SOK_OS=$(check_os)
-    PORT=$(generate_random_port)
-    if [ -z "$PORT" ] || ! [[ "$PORT" =~ ^[0-9]+$ ]]; then
-        echo -e "${RED}Lỗi: Cổng không hợp lệ ($PORT).${NC}"
-        echo -e ""
-        read -p "Nhấn Enter để tiếp tục..."
-        return
-    fi
-    echo -e "${GREEN}Đang thay đổi cổng Squid thành $PORT...${NC}"
-    echo -e ""
-    if [ -f /etc/squid/squid.conf ]; then
-        sed -i "s/http_port [0-9]\+/http_port $PORT/" /etc/squid/squid.conf || {
-            echo -e "${RED}Lỗi khi cập nhật tệp cấu hình Squid.${NC}"
-            echo -e ""
-            read -p "Nhấn Enter để tiếp tục..."
-            return
-        }
-    elif [ -f /etc/squid3/squid.conf ]; then
-        sed -i "s/http_port [0-9]\+/http_port $PORT/" /etc/squid3/squid.conf || {
-            echo -e "${RED}Lỗi khi cập nhật tệp cấu hình Squid.${NC}"
-            echo -e ""
-            read -p "Nhấn Enter để tiếp tục..."
-            return
-        }
-    else
-        echo -e "${RED}Không tìm thấy tệp cấu hình Squid.${NC}"
-        echo -e ""
-        read -p "Nhấn Enter để tiếp tục..."
-        return
-    fi
+    OLD_PORT=$(grep -E "^http_port" /etc/squid/squid.conf | awk '{print $2}' 2>/dev/null || echo "3128")
+    NEW_PORT=$(generate_random_port)
+    echo -e "${GREEN}Đang thay cổng từ $OLD_PORT thành $NEW_PORT...${NC}"
+
+    sed -i "s/http_port $OLD_PORT/http_port $NEW_PORT/" /etc/squid/squid.conf || { echo -e "${RED}Lỗi cập nhật config.${NC}"; return; }
+
     if [[ $SOK_OS == centos* || $SOK_OS == almalinux* ]]; then
-        echo -e "${GREEN}Đang cập nhật firewall...${NC}"
-        firewall-cmd --zone=public --permanent --remove-port=3128/tcp >/dev/null 2>&1
-        firewall-cmd --zone=public --permanent --add-port=$PORT/tcp >/dev/null 2>&1
-        firewall-cmd --reload >/dev/null 2>&1 || {
-            echo -e "${RED}Lỗi khi cập nhật firewall.${NC}"
-            echo -e ""
-            read -p "Nhấn Enter để tiếp tục..."
-            return
-        }
+        if [ -f /usr/bin/firewall-cmd ]; then
+            firewall-cmd --zone=public --permanent --remove-port=$OLD_PORT/tcp >/dev/null 2>&1
+            firewall-cmd --zone=public --permanent --add-port=$NEW_PORT/tcp >/dev/null 2>&1
+            firewall-cmd --reload >/dev/null 2>&1 || echo -e "${RED}Lỗi reload firewall.${NC}"
+        fi
     else
-        echo -e "${GREEN}Đang cập nhật iptables...${NC}"
-        iptables -D INPUT -p tcp --dport 3128 -j ACCEPT 2>/dev/null
-        iptables -I INPUT -p tcp --dport $PORT -j ACCEPT || {
-            echo -e "${RED}Lỗi khi cập nhật iptables cho cổng $PORT.${NC}"
-            echo -e ""
-            read -p "Nhấn Enter để tiếp tục..."
-            return
-        }
-        iptables-save >/dev/null 2>&1
+        if [ -f /sbin/iptables ]; then
+            iptables -D INPUT -p tcp --dport $OLD_PORT -j ACCEPT 2>/dev/null
+            iptables -I INPUT -p tcp --dport $NEW_PORT -j ACCEPT
+            iptables-save >/dev/null 2>&1 || echo -e "${RED}Lỗi lưu iptables.${NC}"
+        fi
     fi
-    echo -e "${GREEN}Đang khởi động lại dịch vụ Squid...${NC}"
-    systemctl restart squid || {
-        echo -e "${RED}Lỗi khởi động squid. Vui lòng kiểm tra dịch vụ: 'systemctl status squid'.${NC}"
-        echo -e ""
-        read -p "Nhấn Enter để tiếp tục..."
-        return
-    }
-    echo -e "${GREEN}Thay đổi cổng thành $PORT thành công.${NC}"
-    echo -e ""
-    read -p "Nhấn Enter để tiếp tục..."
+
+    systemctl restart squid || { echo -e "${RED}Lỗi khởi động lại squid.${NC}"; return; }
+    echo -e "${GREEN}Thay cổng thành công: $NEW_PORT${NC}"
 }
 
 # Hàm hiển thị menu
@@ -434,12 +297,15 @@ show_menu() {
         4) change_port ;;
         5) check_squid_status ;;
         0) exit 0 ;;
-        *) echo -e "${RED}Tùy chọn không hợp lệ!${NC}"; read -p "Nhấn Enter để tiếp tục..."; show_menu ;;
+        *) echo -e "${RED}Tùy chọn không hợp lệ!${NC}" ;;
     esac
+    read -p "Nhấn Enter để tiếp tục..."
 }
 
-# Kiểm tra quyền root và hiển thị menu
+# Chạy script
 check_root
+install_dependencies
+download_sok_find_os
 while true; do
     show_menu
 done

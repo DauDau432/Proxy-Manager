@@ -14,7 +14,7 @@ USERS_FILE="/etc/squid/users.txt"
 # Function to center text
 center_text() {
     local text="$1"
-    local width=85
+    local width=55
     local text_len=${#text}
     local padding=$(( (width - text_len) / 2 ))
     printf "%${padding}s%s%${padding}s\n" "" "$text" ""
@@ -27,10 +27,12 @@ display_header() {
     local user_count=0
     if systemctl is-active --quiet squid; then
         status="Đang chạy"
-        proxy_count=$(grep http_port $SQUID_CONF 2>/dev/null | wc -l)
-        user_count=$(wc -l < $USERS_FILE 2>/dev/null)
+        proxy_count=$(grep -oP '^http_port \S+:\d+' $SQUID_CONF | wc -l)
+        if [ -f "$PASSWD_FILE" ] && [ -s "$PASSWD_FILE" ]; then
+            user_count=$(grep -v '^#' $PASSWD_FILE | wc -l)
+        fi
     fi
-    echo -e "${GREEN}=================== [Trạng thái Proxy: $status | Proxy: $proxy_count | User: $user_count] ===================${NC}"
+    echo -e "[Trạng thái Proxy: $status | Proxy: $proxy_count | User: $user_count]"
 }
 
 # Function to check and install Squid
@@ -46,20 +48,40 @@ check_and_install_squid() {
     echo -e "${WHITE}[-] Đang lấy danh sách IP...${NC}"
     ip_list=$(ip addr | grep inet | grep -v inet6 | grep -v 127.0.0.1 | awk '{print $2}' | cut -d'/' -f1)
     if [ -z "$ip_list" ]; then
-        echo -e "${RED}[!] Không tìm thấy IP IPv4 nào trên VPS.${NC}"
+        echo -e "${RED}[!] Không tìm thấy IP IPv4 nào trên VPS, ấn Enter để quay lại.${NC}"
+        read
         exit 1
     fi
-    echo "Danh sách IP chưa add:"
-    select ip in $ip_list; do
-        if [ -n "$ip" ]; then
-            break
-        fi
-        echo -e "${RED}[!] Vui lòng chọn IP hợp lệ.${NC}"
+    echo "Danh sách IP chưa có:"
+    ip_array=($ip_list)
+    for i in "${!ip_array[@]}"; do
+        echo " [$((i+1))] ${ip_array[$i]}"
     done
+    read -p "-> Chọn số thứ tự IP để cài proxy (Enter để hủy): " choice
+    if [ -z "$choice" ]; then
+        echo -e "${RED}[!] Đã hủy thao tác, ấn Enter để quay lại.${NC}"
+        read
+        exit 1
+    fi
+    ip=${ip_array[$((choice-1))]}
+    if [ -z "$ip" ]; then
+        echo -e "${RED}[!] Vui lòng chọn IP hợp lệ, ấn Enter để quay lại.${NC}"
+        read
+        exit 1
+    fi
     port=$((RANDOM % 64511 + 1024))
     read -p "-> Nhập username cho proxy: " username
-    read -sp "-> Nhập password cho proxy: " password
-    echo
+    if [ -z "$username" ]; then
+        echo -e "${RED}[!] Không được để trống, ấn Enter để quay lại.${NC}"
+        read
+        exit 1
+    fi
+    read -p "-> Nhập password cho proxy: " password
+    if [ -z "$password" ]; then
+        echo -e "${RED}[!] Không được để trống, ấn Enter để quay lại.${NC}"
+        read
+        exit 1
+    fi
     htpasswd -b -c $PASSWD_FILE "$username" "$password" >/dev/null 2>&1
     echo "$username:$password:$(date +%F_%H:%M):ALL" >> $USERS_FILE
     echo "auth_param basic program /usr/lib/squid/basic_ncsa_auth $PASSWD_FILE" > $SQUID_CONF
@@ -68,17 +90,17 @@ check_and_install_squid() {
     echo "http_access allow authenticated" >> $SQUID_CONF
     echo "http_access deny all" >> $SQUID_CONF
     echo "http_port $ip:$port" >> $SQUID_CONF
+    echo -e "${WHITE}[-] Đang cấu hình firewall và khởi động proxy...${NC}"
     iptables -I INPUT -p tcp --dport $port -j ACCEPT >/dev/null 2>&1
     systemctl restart squid >/dev/null 2>&1
-    echo -e "${GREEN}[+] Cài đặt proxy thành công: $ip:$port:$username:$password${NC}"
-    echo -e "${WHITE}[-] Nhấn Enter để tiếp tục...${NC}"
+    echo -e "${GREEN}[+] Cài đặt proxy thành công: $ip:$port:$username:$password, ấn Enter để quay lại.${NC}"
     read
 }
 
 # Function to get unadded IPs
 get_unadded_ips() {
     ip_list=$(ip addr | grep inet | grep -v inet6 | grep -v 127.0.0.1 | awk '{print $2}' | cut -d'/' -f1)
-    added_ips=$(grep http_port $SQUID_CONF 2>/dev/null | awk '{print $2}' | cut -d':' -f1)
+    added_ips=$(grep -oP '^http_port \S+:\d+' $SQUID_CONF | awk '{print $2}' | cut -d':' -f1)
     unadded_ips=""
     for ip in $ip_list; do
         if ! echo "$added_ips" | grep -q "$ip"; then
@@ -92,269 +114,291 @@ get_unadded_ips() {
 add_proxy() {
     unadded_ips=$(get_unadded_ips)
     if [ -z "$unadded_ips" ]; then
-        echo -e "${RED}[!] Tất cả IP đã được add proxy.${NC}"
-        echo -e "${WHITE}[-] Nhấn Enter để quay lại...${NC}"
+        echo -e "${RED}[!] Tất cả IP đã được add proxy, ấn Enter để quay lại.${NC}"
         read
         return
     fi
-    echo "Danh sách IP chưa add:"
-    select ip in $unadded_ips; do
-        if [ -n "$ip" ]; then
-            break
-        fi
-        echo -e "${RED}[!] Vui lòng chọn IP hợp lệ.${NC}"
+    echo "Danh sách IP chưa có:"
+    ip_array=($unadded_ips)
+    for i in "${!ip_array[@]}"; do
+        echo " [$((i+1))] ${ip_array[$i]}"
     done
-    port=$((RANDOM % 64511 + 1024))
-    read -p "-> Nhập username (Enter để dùng user chung): " username
-    read -sp "-> Nhập password (Enter để dùng pass chung): " password
-    echo
-    if [ -z "$username" ] || [ -z "$password" ]; then
-        username=$(grep ':ALL$' $USERS_FILE | head -n 1 | cut -d':' -f1)
-        password=$(grep ':ALL$' $USERS_FILE | head -n 1 | cut -d':' -f2)
-    else
-        htpasswd -b $PASSWD_FILE "$username" "$password" >/dev/null 2>&1
-        echo "$username:$password:$(date +%F_%H:%M):$ip:$port" >> $USERS_FILE
+    read -p "-> Chọn số thứ tự IP để add proxy (Enter để hủy): " choice
+    if [ -z "$choice" ]; then
+        echo -e "${RED}[!] Đã hủy thao tác, ấn Enter để quay lại.${NC}"
+        read
+        return
     fi
+    # Kiểm tra phạm vi hợp lệ cho choice
+    if ! [[ "$choice" =~ ^[0-9]+$ ]] || [ "$choice" -lt 1 ] || [ "$choice" -gt "${#ip_array[@]}" ]; then
+        echo -e "${RED}[!] Lựa chọn không hợp lệ, ấn Enter để quay lại.${NC}"
+        read
+        return
+    fi
+    ip=${ip_array[$((choice-1))]}
+    if [ -z "$ip" ]; then
+        echo -e "${RED}[!] Lỗi chọn IP, ấn Enter để quay lại.${NC}"
+        read
+        return
+    fi
+    port=$((RANDOM % 64511 + 1024))
+    read -p "-> Nhập username: " username
+    if [ -z "$username" ]; then
+        echo -e "${RED}[!] Không được để trống, ấn Enter để quay lại.${NC}"
+        read
+        return
+    fi
+    read -p "-> Nhập password: " password
+    if [ -z "$password" ]; then
+        echo -e "${RED}[!] Không được để trống, ấn Enter để quay lại.${NC}"
+        read
+        return
+    fi
+    htpasswd -b $PASSWD_FILE "$username" "$password" >/dev/null 2>&1
     echo "http_port $ip:$port" >> $SQUID_CONF
+    echo -e "${WHITE}[-] Đang cấu hình firewall và khởi động proxy...${NC}"
     iptables -I INPUT -p tcp --dport $port -j ACCEPT >/dev/null 2>&1
     systemctl restart squid >/dev/null 2>&1
-    echo -e "${GREEN}[+] Thêm proxy thành công: $ip:$port:$username:$password${NC}"
-    echo -e "${WHITE}[-] Nhấn Enter để quay lại...${NC}"
+    echo -e "${GREEN}[+] Thêm proxy thành công: $ip:$port:${username}:${password}, ấn Enter để quay lại.${NC}"
     read
 }
 
 # Function to edit proxy
 edit_proxy() {
-    proxy_list=$(grep http_port $SQUID_CONF | awk '{print $2}' | nl -w2 -s'. ')
+    proxy_list=$(grep -oP '^http_port \S+:\d+' $SQUID_CONF | awk '{print $2}' | nl -w2 -s'. ')
     if [ -z "$proxy_list" ]; then
-        echo -e "${RED}[!] Không có proxy nào để chỉnh sửa.${NC}"
-        echo -e "${WHITE}[-] Nhấn Enter để quay lại...${NC}"
+        echo -e "${RED}[!] Không có proxy nào để chỉnh sửa, ấn Enter để quay lại.${NC}"
         read
         return
     fi
-    echo "Danh sách proxy đã add:"
+    echo "Danh sách proxy hiện có:"
     echo "$proxy_list" | while read -r line; do
         num=$(echo "$line" | awk '{print $1}')
         ip_port=$(echo "$line" | awk '{print $2}')
-        user_pass=$(grep ":$ip_port$" $USERS_FILE | head -n 1 | cut -d':' -f1,2)
-        echo "  [$num] $ip_port:$user_pass"
+        echo " [$num] $ip_port"
     done
     read -p "-> Chọn số thứ tự proxy để chỉnh sửa: " choice
+    if [ -z "$choice" ] || [ "$choice" -eq 0 ]; then
+        echo -e "${RED}[!] Lựa chọn không hợp lệ, ấn Enter để quay lại.${NC}"
+        read
+        return
+    fi
     selected=$(echo "$proxy_list" | grep "^ *$choice\." | awk '{print $2}')
     if [ -z "$selected" ]; then
-        echo -e "${RED}[!] Lựa chọn không hợp lệ.${NC}"
-        echo -e "${WHITE}[-] Nhấn Enter để quay lại...${NC}"
+        echo -e "${RED}[!] Lựa chọn không hợp lệ, ấn Enter để quay lại.${NC}"
         read
         return
     fi
     old_ip=$(echo "$selected" | cut -d':' -f1)
     old_port=$(echo "$selected" | cut -d':' -f2)
-    old_user=$(grep ":$selected$" $USERS_FILE | head -n 1 | cut -d':' -f1)
-    old_pass=$(grep ":$selected$" $USERS_FILE | head -n 1 | cut -d':' -f2)
     unadded_ips=$(get_unadded_ips)
     if [ -n "$unadded_ips" ]; then
-        echo "Danh sách IP chưa add:"
-        select ip in $unadded_ips; do
-            if [ -n "$ip" ]; then
-                break
-            fi
-            echo -e "${RED}[!] Vui lòng chọn IP hợp lệ hoặc Enter để giữ $old_ip.${NC}"
-            ip="$old_ip"
-            break
+        echo "Danh sách IP chưa có:"
+        ip_array=($unadded_ips)
+        for i in "${!ip_array[@]}"; do
+            echo " [$((i+1))] ${ip_array[$i]}"
         done
+        read -p "-> Chọn số thứ tự IP mới (Enter để giữ nguyên): " choice
+        ip=${ip_array[$((choice-1))]:-$old_ip}
     else
         ip="$old_ip"
-        echo -e "${RED}[!] Không có IP chưa add, giữ IP cũ: $old_ip.${NC}"
+        echo -e "${RED}[!] Không có IP chưa có, giữ IP cũ: $old_ip.${NC}"
     fi
-    read -p "-> Nhập cổng mới (Enter để giữ $old_port): " port
+    read -p "-> Nhập cổng mới (Enter để giữ nguyên): " port
     port=${port:-$old_port}
-    read -p "-> Nhập username mới (Enter để giữ $old_user): " username
-    read -sp "-> Nhập password mới (Enter để giữ password cũ): " password
+    read -p "-> Nhập username mới (Enter để giữ nguyên): " username
+    read -sp "-> Nhập password mới (Enter để giữ nguyên): " password
     echo
-    username=${username:-$old_user}
-    password=${password:-$old_pass}
-    if [ "$username" != "$old_user" ] || [ "$password" != "$old_pass" ]; then
+    if [ -n "$username" ] && [ -n "$password" ]; then
         htpasswd -b $PASSWD_FILE "$username" "$password" >/dev/null 2>&1
-        sed -i "/:$old_ip:$old_port$/d" $USERS_FILE
-        echo "$username:$password:$(date +%F_%H:%M):$ip:$port" >> $USERS_FILE
+        echo -e "${WHITE}[-] Đang khởi động lại proxy...${NC}"
+        systemctl restart squid >/dev/null 2>&1
     fi
-    sed -i "s/http_port $old_ip:$old_port/http_port $ip:$port/" $SQUID_CONF
-    iptables -D INPUT -p tcp --dport $old_port -j ACCEPT >/dev/null 2>&1
-    iptables -I INPUT -p tcp --dport $port -j ACCEPT >/dev/null 2>&1
-    systemctl restart squid >/dev/null 2>&1
-    echo -e "${GREEN}[+] Cập nhật proxy thành công: $ip:$port:$username:$password${NC}"
-    echo -e "${WHITE}[-] Nhấn Enter để quay lại...${NC}"
+    if [ "$ip:$port" != "$old_ip:$old_port" ]; then
+        echo -e "${WHITE}[-] Đang cấu hình firewall và khởi động proxy...${NC}"
+        sed -i "s/http_port $old_ip:$old_port/http_port $ip:$port/" $SQUID_CONF
+        iptables -D INPUT -p tcp --dport $old_port -j ACCEPT >/dev/null 2>&1
+        iptables -I INPUT -p tcp --dport $port -j ACCEPT >/dev/null 2>&1
+        systemctl restart squid >/dev/null 2>&1
+    fi
+    echo -e "${GREEN}[+] Cập nhật proxy thành công: $ip:$port, ấn Enter để quay lại.${NC}"
     read
 }
 
 # Function to delete proxy
 delete_proxy() {
-    proxy_list=$(grep http_port $SQUID_CONF | awk '{print $2}' | nl -w2 -s'. ')
+    proxy_list=$(grep -oP '^http_port \S+:\d+' $SQUID_CONF | awk '{print $2}' | nl -w2 -s'. ')
     if [ -z "$proxy_list" ]; then
-        echo -e "${RED}[!] Không có proxy nào để xóa.${NC}"
-        echo -e "${WHITE}[-] Nhấn Enter để quay lại...${NC}"
+        echo -e "${RED}[!] Không có proxy nào để xóa, ấn Enter để quay lại.${NC}"
         read
         return
     fi
-    echo "Danh sách proxy đã add:"
+    echo "Danh sách proxy hiện có:"
     echo "$proxy_list" | while read -r line; do
         num=$(echo "$line" | awk '{print $1}')
         ip_port=$(echo "$line" | awk '{print $2}')
-        user_pass=$(grep ":$ip_port$" $USERS_FILE | head -n 1 | cut -d':' -f1,2)
-        echo "  [$num] $ip_port:$user_pass"
+        echo " [$num] $ip_port"
     done
     read -p "-> Chọn số thứ tự proxy để xóa: " choice
+    if [ -z "$choice" ] || [ "$choice" -eq 0 ]; then
+        echo -e "${RED}[!] Lựa chọn không hợp lệ, ấn Enter để quay lại.${NC}"
+        read
+        return
+    fi
     selected=$(echo "$proxy_list" | grep "^ *$choice\." | awk '{print $2}')
     if [ -z "$selected" ]; then
-        echo -e "${RED}[!] Lựa chọn không hợp lệ.${NC}"
-        echo -e "${WHITE}[-] Nhấn Enter để quay lại...${NC}"
+        echo -e "${RED}[!] Lựa chọn không hợp lệ, ấn Enter để quay lại.${NC}"
         read
         return
     fi
     ip=$(echo "$selected" | cut -d':' -f1)
     port=$(echo "$selected" | cut -d':' -f2)
+    echo -e "${WHITE}[-] Đang xóa proxy và cấu hình firewall...${NC}"
     sed -i "/http_port $ip:$port/d" $SQUID_CONF
     iptables -D INPUT -p tcp --dport $port -j ACCEPT >/dev/null 2>&1
-    sed -i "/:$ip:$port$/d" $USERS_FILE
     systemctl restart squid >/dev/null 2>&1
-    echo -e "${GREEN}[+] Xóa proxy $ip:$port thành công${NC}"
-    echo -e "${WHITE}[-] Nhấn Enter để quay lại...${NC}"
+    echo -e "${GREEN}[+] Xóa proxy $ip:$port thành công, ấn Enter để quay lại.${NC}"
     read
 }
 
 # Function to add user
 add_user() {
+    echo -e "${WHITE}[-] Lưu ý: User mới sẽ dùng chung cho tất cả proxy hiện có.${NC}"
     read -p "-> Nhập username mới: " username
-    read -sp "-> Nhập password mới: " password
-    echo
-    if grep -q "^$username:" $USERS_FILE; then
-        echo -e "${RED}[!] Username đã tồn tại.${NC}"
-        echo -e "${WHITE}[-] Nhấn Enter để quay lại...${NC}"
+    if [ -z "$username" ]; then
+        echo -e "${RED}[!] Không được để trống, ấn Enter để quay lại.${NC}"
+        read
+        return
+    fi
+    if grep -q "^$username:" $PASSWD_FILE; then
+        echo -e "${RED}[!] Username '$username' đã tồn tại, vui lòng nhập username khác.${NC}"
+        read
+        return
+    fi
+    read -p "-> Nhập password mới: " password
+    if [ -z "$password" ]; then
+        echo -e "${RED}[!] Không được để trống, ấn Enter để quay lại.${NC}"
         read
         return
     fi
     htpasswd -b $PASSWD_FILE "$username" "$password" >/dev/null 2>&1
-    echo "$username:$password:$(date +%F_%H:%M):ALL" >> $USERS_FILE
+    echo -e "${WHITE}[-] Đang khởi động lại proxy...${NC}"
     systemctl restart squid >/dev/null 2>&1
-    echo -e "${GREEN}[+] Thêm user $username thành công${NC}"
-    echo -e "${WHITE}[-] Nhấn Enter để quay lại...${NC}"
+    echo -e "${GREEN}[+] Thêm user $username thành công, ấn Enter để quay lại.${NC}"
     read
 }
 
 # Function to edit user
 edit_user() {
-    user_list=$(cat $USERS_FILE | nl -w2 -s'. ')
-    if [ -z "$user_list" ]; then
-        echo -e "${RED}[!] Không có user nào để chỉnh sửa.${NC}"
-        echo -e "${WHITE}[-] Nhấn Enter để quay lại...${NC}"
+    if [ ! -f "$PASSWD_FILE" ] || [ ! -s "$PASSWD_FILE" ]; then
+        echo -e "${RED}[!] Không có user nào để chỉnh sửa, ấn Enter để quay lại.${NC}"
         read
         return
     fi
     echo "Danh sách user hiện có:"
+    user_list=$(cat $PASSWD_FILE | grep -v '^#' | awk -F: '{print $1}' | nl -w2 -s' ')
     echo "$user_list" | while read -r line; do
         num=$(echo "$line" | awk '{print $1}')
-        user=$(echo "$line" | cut -d':' -f1)
-        pass=$(echo "$line" | cut -d':' -f2)
-        scope=$(echo "$line" | cut -d':' -f4-)
-        if [ "$scope" = "ALL" ]; then
-            echo "  [$num] $user:$pass (Chung)"
-        else
-            echo "  [$num] $user:$pass (Riêng: $scope)"
-        fi
+        user=$(echo "$line" | awk '{print $2}')
+        echo " [$num] $user"
     done
     read -p "-> Chọn số thứ tự user để chỉnh sửa: " choice
-    selected=$(echo "$user_list" | grep "^ *$choice\." | cut -d':' -f1,2,4-)
-    if [ -z "$selected" ]; then
-        echo -e "${RED}[!] Lựa chọn không hợp lệ.${NC}"
-        echo -e "${WHITE}[-] Nhấn Enter để quay lại...${NC}"
+    if [ -z "$choice" ] || [ "$choice" -eq 0 ]; then
+        echo -e "${RED}[!] Lựa chọn không hợp lệ, ấn Enter để quay lại.${NC}"
         read
         return
     fi
-    old_user=$(echo "$selected" | cut -d':' -f1)
-    old_pass=$(echo "$selected" | cut -d':' -f2)
-    scope=$(echo "$selected" | cut -d':' -f3-)
-    read -p "-> Nhập username mới (Enter để giữ $old_user): " username
-    read -sp "-> Nhập password mới (Enter để giữ password cũ): " password
+    selected=$(echo "$user_list" | grep "^ *$choice " | awk '{print $2}')
+    if [ -z "$selected" ]; then
+        echo -e "${RED}[!] Lựa chọn không hợp lệ, ấn Enter để quay lại.${NC}"
+        read
+        return
+    fi
+    old_user=$selected
+    old_pass=$(htpasswd -b -n $selected "" | cut -d':' -f2)
+    read -p "-> Nhập username mới (Enter để giữ nguyên): " username
+    read -sp "-> Nhập password mới (Enter để giữ nguyên): " password
     echo
     username=${username:-$old_user}
-    password=${password:-$old_pass}
-    if [ "$username" != "$old_user" ] || [ "$password" != "$old_pass" ]; then
+    if [ -n "$password" ]; then
         htpasswd -b $PASSWD_FILE "$username" "$password" >/dev/null 2>&1
-        sed -i "/^$old_user:/d" $USERS_FILE
-        echo "$username:$password:$(date +%F_%H:%M):$scope" >> $USERS_FILE
+    elif [ "$username" != "$old_user" ]; then
+        htpasswd -D $PASSWD_FILE "$old_user" >/dev/null 2>&1
+        htpasswd -b $PASSWD_FILE "$username" "$old_pass" >/dev/null 2>&1
+    fi
+    if [ "$username" != "$old_user" ] || [ -n "$password" ]; then
+        echo -e "${WHITE}[-] Đang khởi động lại proxy...${NC}"
         systemctl restart squid >/dev/null 2>&1
     fi
-    echo -e "${GREEN}[+] Cập nhật user $username thành công${NC}"
-    echo -e "${WHITE}[-] Nhấn Enter để quay lại...${NC}"
+    echo -e "${GREEN}[+] Cập nhật username $username thành công, ấn Enter để quay lại.${NC}"
     read
 }
 
 # Function to delete user
 delete_user() {
-    user_list=$(cat $USERS_FILE | nl -w2 -s'. ')
-    if [ -z "$user_list" ]; then
-        echo -e "${RED}[!] Không có user nào để xóa.${NC}"
-        echo -e "${WHITE}[-] Nhấn Enter để quay lại...${NC}"
+    if [ ! -f "$PASSWD_FILE" ] || [ ! -s "$PASSWD_FILE" ]; then
+        echo -e "${RED}[!] Không có user nào để xóa, ấn Enter để quay lại.${NC}"
         read
         return
     fi
     echo "Danh sách user hiện có:"
+    user_list=$(cat $PASSWD_FILE | grep -v '^#' | awk -F: '{print $1}' | nl -w2 -s' ')
     echo "$user_list" | while read -r line; do
         num=$(echo "$line" | awk '{print $1}')
-        user=$(echo "$line" | cut -d':' -f1)
-        pass=$(echo "$line" | cut -d':' -f2)
-        scope=$(echo "$line" | cut -d':' -f4-)
-        if [ "$scope" = "ALL" ]; then
-            echo "  [$num] $user:$pass (Chung)"
-        else
-            echo "  [$num] $user:$pass (Riêng: $scope)"
-        fi
+        user=$(echo "$line" | awk '{print $2}')
+        echo " [$num] $user"
     done
     read -p "-> Chọn số thứ tự user để xóa: " choice
-    selected=$(echo "$user_list" | grep "^ *$choice\." | cut -d':' -f1)
-    if [ -z "$selected" ]; then
-        echo -e "${RED}[!] Lựa chọn không hợp lệ.${NC}"
-        echo -e "${WHITE}[-] Nhấn Enter để quay lại...${NC}"
+    if [ -z "$choice" ] || [ "$choice" -eq 0 ]; then
+        echo -e "${RED}[!] Lựa chọn không hợp lệ, ấn Enter để quay lại.${NC}"
         read
         return
     fi
+    selected=$(echo "$user_list" | grep "^ *$choice " | awk '{print $2}')
+    if [ -z "$selected" ]; then
+        echo -e "${RED}[!] Lựa chọn không hợp lệ, ấn Enter để quay lại.${NC}"
+        read
+        return
+    fi
+    echo -e "${WHITE}[-] Đang xóa user và khởi động lại proxy...${NC}"
     htpasswd -D $PASSWD_FILE "$selected" >/dev/null 2>&1
-    sed -i "/^$selected:/d" $USERS_FILE
+    if [ $? -ne 0 ]; then
+        echo -e "${RED}[!] Lỗi khi xóa user $selected từ $PASSWD_FILE, ấn Enter để quay lại.${NC}"
+        read
+    else
+        echo -e "${GREEN}[+] Xóa user $selected thành công, ấn Enter để quay lại.${NC}"
+        read
+    fi
+    echo -e "${WHITE}[-] Đang khởi động lại proxy...${NC}"
     systemctl restart squid >/dev/null 2>&1
-    echo -e "${GREEN}[+] Xóa user $selected thành công${NC}"
-    echo -e "${WHITE}[-] Nhấn Enter để quay lại...${NC}"
-    read
 }
 
 # Function to restart proxy
 restart_proxy() {
+    echo -e "${WHITE}[-] Đang khởi động lại proxy...${NC}"
     systemctl restart squid >/dev/null 2>&1
     if systemctl is-active --quiet squid; then
-        echo -e "${GREEN}[+] Khởi động lại proxy thành công${NC}"
+        echo -e "${GREEN}[+] Khởi động lại proxy thành công, ấn Enter để quay lại.${NC}"
     else
-        echo -e "${RED}[!] Lỗi khi khởi động lại proxy${NC}"
+        echo -e "${RED}[!] Lỗi khi khởi động lại proxy, ấn Enter để quay lại.${NC}"
     fi
-    echo -e "${WHITE}[-] Nhấn Enter để quay lại...${NC}"
     read
 }
 
 # Function to view proxy list
 view_proxy_list() {
-    proxy_list=$(grep http_port $SQUID_CONF | awk '{print $2}' | nl -w2 -s'. ')
+    proxy_list=$(grep -oP '^http_port \S+:\d+' $SQUID_CONF | awk '{print $2}' | nl -w2 -s'. ')
     if [ -z "$proxy_list" ]; then
-        echo -e "${RED}[!] Không có proxy nào.${NC}"
+        echo -e "${RED}[!] Không có proxy nào, ấn Enter để quay lại.${NC}"
     else
-        echo "Danh sách proxy đã add:"
+        echo "Danh sách proxy hiện có:"
         echo "$proxy_list" | while read -r line; do
             num=$(echo "$line" | awk '{print $1}')
             ip_port=$(echo "$line" | awk '{print $2}')
-            user_pass=$(grep ":$ip_port$" $USERS_FILE | head -n 1 | cut -d':' -f1,2)
-            echo "  [$num] $ip_port:$user_pass"
+            echo " [$num] $ip_port"
         done
+        echo -e "${WHITE}[!] ấn Enter để quay lại.${NC}"
     fi
-    echo -e "${RED}[!] Bảo vệ mật khẩu, không chia sẻ công khai.${NC}"
-    echo -e "${WHITE}[-] Sử dụng proxy: <IP>:<port>:<username>:<password>${NC}"
-    echo -e "${WHITE}[-] Nhấn Enter để quay lại...${NC}"
     read
 }
 
@@ -363,36 +407,32 @@ view_unadded_ips() {
     unadded_ips=$(get_unadded_ips)
     count=$(echo "$unadded_ips" | wc -w)
     if [ -z "$unadded_ips" ]; then
-        echo -e "${RED}[!] Không có IP chưa add (Tổng: 0).${NC}"
+        echo -e "${RED}[!] Không có IP, ấn Enter để quay lại.${NC}"
     else
-        echo "Danh sách IP chưa add (Tổng: $count):"
-        echo "$unadded_ips" | nl -w2 -s'. '
+        echo "Danh sách IP chưa có (Tổng: $count):"
+        ip_array=($unadded_ips)
+        for i in "${!ip_array[@]}"; do
+            echo " [$((i+1))] ${ip_array[$i]}"
+        done
+        echo -e "${WHITE}[!] ấn Enter để quay lại.${NC}"
     fi
-    echo -e "${WHITE}[-] Nhấn Enter để quay lại...${NC}"
     read
 }
 
 # Function to view user list
 view_user_list() {
-    user_list=$(cat $USERS_FILE | nl -w2 -s'. ')
-    if [ -z "$user_list" ]; then
-        echo -e "${RED}[!] Không có user nào.${NC}"
+    if [ ! -f "$PASSWD_FILE" ] || [ ! -s "$PASSWD_FILE" ]; then
+        echo -e "${RED}[!] Không có user nào, ấn Enter để quay lại.${NC}"
     else
         echo "Danh sách user hiện có:"
+        user_list=$(cat $PASSWD_FILE | grep -v '^#' | awk -F: '{print $1}' | nl -w2 -s' ')
         echo "$user_list" | while read -r line; do
             num=$(echo "$line" | awk '{print $1}')
-            user=$(echo "$line" | cut -d':' -f1)
-            pass=$(echo "$line" | cut -d':' -f2)
-            scope=$(echo "$line" | cut -d':' -f4-)
-            if [ "$scope" = "ALL" ]; then
-                echo "  [$num] $user:$pass (Chung)"
-            else
-                echo "  [$num] $user:$pass (Riêng: $scope)"
-            fi
+            user=$(echo "$line" | awk '{print $2}')
+            echo " [$num] $user"
         done
+        echo -e "${WHITE}[!] ấn Enter để quay lại.${NC}"
     fi
-    echo -e "${RED}[!] Bảo vệ mật khẩu, không chia sẻ công khai.${NC}"
-    echo -e "${WHITE}[-] Nhấn Enter để quay lại...${NC}"
     read
 }
 
@@ -402,7 +442,6 @@ while true; do
     clear
     display_header
     center_text "Menu Quản Lý Proxy"
-    echo -e "${WHITE}============================ Menu Quản Lý Proxy =============================${NC}"
     echo "[1] Quản lý Proxy"
     echo "[2] Quản lý User"
     echo "[3] Khởi động lại Proxy"
@@ -415,7 +454,6 @@ while true; do
                 clear
                 display_header
                 center_text "Quản lý Proxy"
-                echo -e "${WHITE}============================ Quản lý Proxy =============================${NC}"
                 echo "[1] Add Proxy"
                 echo "[2] Edit Proxy"
                 echo "[3] Xóa Proxy"
@@ -426,7 +464,7 @@ while true; do
                     2) edit_proxy ;;
                     3) delete_proxy ;;
                     0) break ;;
-                    *) echo -e "${RED}[!] Lựa chọn không hợp lệ.${NC}"; echo -e "${WHITE}[-] Nhấn Enter để quay lại...${NC}"; read ;;
+                    *) echo -e "${RED}[!] Lựa chọn không hợp lệ, ấn Enter để quay lại...${NC}"; read ;;
                 esac
             done
             ;;
@@ -435,7 +473,6 @@ while true; do
                 clear
                 display_header
                 center_text "Quản lý User"
-                echo -e "${WHITE}============================ Quản lý User =============================${NC}"
                 echo "[1] Add User"
                 echo "[2] Edit User"
                 echo "[3] Xóa User"
@@ -446,7 +483,7 @@ while true; do
                     2) edit_user ;;
                     3) delete_user ;;
                     0) break ;;
-                    *) echo -e "${RED}[!] Lựa chọn không hợp lệ.${NC}"; echo -e "${WHITE}[-] Nhấn Enter để quay lại...${NC}"; read ;;
+                    *) echo -e "${RED}[!] Lựa chọn không hợp lệ, ấn Enter để quay lại...${NC}"; read ;;
                 esac
             done
             ;;
@@ -456,9 +493,8 @@ while true; do
                 clear
                 display_header
                 center_text "Xem danh sách"
-                echo -e "${WHITE}============================ Xem danh sách =============================${NC}"
-                echo "[1] Xem danh sách proxy đã add"
-                echo "[2] Xem danh sách IP chưa add"
+                echo "[1] Xem danh sách proxy hiện có"
+                echo "[2] Xem danh sách IP chưa có"
                 echo "[3] Xem danh sách user hiện có"
                 echo "[0] Quay lại"
                 read -p "-> Chọn một tùy chọn [0-3]: " sub_choice
@@ -467,11 +503,11 @@ while true; do
                     2) view_unadded_ips ;;
                     3) view_user_list ;;
                     0) break ;;
-                    *) echo -e "${RED}[!] Lựa chọn không hợp lệ.${NC}"; echo -e "${WHITE}[-] Nhấn Enter để quay lại...${NC}"; read ;;
+                    *) echo -e "${RED}[!] Lựa chọn không hợp lệ, ấn Enter để quay lại...${NC}"; read ;;
                 esac
             done
             ;;
         0) exit 0 ;;
-        *) echo -e "${RED}[!] Lựa chọn không hợp lệ.${NC}"; echo -e "${WHITE}[-] Nhấn Enter để tiếp tục...${NC}"; read ;;
+        *) echo -e "${RED}[!] Lựa chọn không hợp lệ, ấn Enter để tiếp tục...${NC}"; read ;;
     esac
 done

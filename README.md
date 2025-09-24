@@ -87,7 +87,7 @@ systemctl restart squid
 ```bash
 systemctl stop squid
 apt purge -y squid apache2-utils
-rm -f /etc/squid/squid.conf /etc/squid/passwd
+rm -rf /etc/squid/
 ```
 
 ---

@@ -160,7 +160,7 @@ add_proxy() {
     echo -e "${WHITE}[-] Đang cấu hình firewall và khởi động proxy...${NC}"
     iptables -I INPUT -p tcp --dport $port -j ACCEPT >/dev/null 2>&1
     systemctl restart squid >/dev/null 2>&1
-    echo -e "${GREEN}[+] Thêm proxy thành công: $ip:$port:$username:$password${NC}"
+    echo -e "${GREEN}[+] Thêm proxy thành công: $ip:$port:$username:$password ấn Enter để quay lại.${NC}"
     read
 }
 
@@ -291,6 +291,7 @@ add_user() {
     echo -e "${GREEN}[+] Thêm user $username thành công, ấn Enter để quay lại.${NC}"
     read
 }
+
 
 # Function to edit user
 edit_user() {

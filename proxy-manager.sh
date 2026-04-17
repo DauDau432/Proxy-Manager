@@ -202,15 +202,15 @@ select_from_list() {
     fi
 
     for i in "${!items[@]}"; do
-        echo " [$((i+1))] ${items[$i]}"
+        echo " [$((i+1))] ${items[$i]}" >&2
     done
 
-    read -r -p "$prompt" choice
+    read -r -p "$prompt" choice </dev/tty >&2
     if [[ ! "$choice" =~ ^[0-9]+$ ]] || (( choice < 1 || choice > ${#items[@]} )); then
         return 1
     fi
 
-    echo "${items[$((choice-1))]}"
+    printf '%s\n' "${items[$((choice-1))]}"
 }
 
 sync_users_file() {

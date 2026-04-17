@@ -76,6 +76,7 @@ list_ipv4s() {
     {
         ip -4 -o addr show scope global 2>/dev/null | awk '{print $4}' | cut -d/ -f1
         ip -4 -o addr show 2>/dev/null | awk '{print $4}' | cut -d/ -f1
+        ip a 2>/dev/null | awk '/inet / {print $2}' | cut -d/ -f1
         hostname -I 2>/dev/null | tr ' ' '\n'
     } | awk 'NF && $1 != "127.0.0.1" && $1 !~ /^169\.254\./' | sort -u
 }
